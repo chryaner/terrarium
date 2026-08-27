@@ -1,0 +1,19 @@
+# Windows 10 from your own installation ISO. Microsoft's media cannot be
+# redistributed, so download it from microsoft.com and save it as
+# %LOCALAPPDATA%\terrarium\isos\win10.iso.
+name: win10
+path: win10.iso
+format: iso
+# Verified against the 22H2 x86 consumer ISO; for a 64-bit ISO set
+# ostype: Windows10_64.
+ostype: Windows10
+# Throwaway by design: it ends up in plain text in the state file. Add a local
+# recipe of the same name to change it.
+password: "1"
+# Microsoft's published generic install key for Pro: selects the edition,
+# activates nothing. Consumer multi-edition ISOs refuse an empty ProductKey.
+key: VK7JG-NPHTM-C97JM-9MPGT-3V66T
+# `VBoxManage unattended detect --iso=...` lists the editions; 6 = Pro.
+image_index: 6
+efi: false
+tpm: false

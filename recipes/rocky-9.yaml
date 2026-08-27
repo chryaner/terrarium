@@ -1,0 +1,6 @@
+name: rocky-9
+url: https://dl.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud-Base.latest.x86_64.qcow2
+format: qcow2
+ostype: RedHat_64
+# Same as alma-9: no guest additions in the EL9 base repos, no /work share.
+packages: []

@@ -1,0 +1,42 @@
+version: 2
+
+project_name: terrarium
+
+builds:
+  - main: ./cmd/terrarium
+    binary: terrarium
+    env:
+      - CGO_ENABLED=0
+    # The host side is Windows-with-VirtualBox by design; other GOOS binaries
+    # would build fine and then fail doctor on first run.
+    goos: [windows]
+    goarch: [amd64]
+    ldflags:
+      - -s -w
+      - -X github.com/chryaner/terrarium/internal/core.Version={{.Version}}
+
+archives:
+  - formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+
+# The Scoop manifest lives in this repo's bucket/ folder, so installation
+# needs no separate bucket repository:
+#   scoop bucket add terrarium https://github.com/chryaner/terrarium
+#   scoop install terrarium
+scoops:
+  - name: terrarium
+    repository:
+      owner: chryaner
+      name: terrarium
+      branch: main
+    directory: bucket
+    homepage: https://github.com/chryaner/terrarium
+    description: Real, disposable computers in seconds, for you and your AI agent.
+    license: Apache-2.0
+    commit_msg_template: "scoop: manifest for {{ .Tag }}"

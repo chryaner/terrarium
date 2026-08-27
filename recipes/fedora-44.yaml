@@ -1,0 +1,7 @@
+name: fedora-44
+# Fedora publishes no "latest" alias; this pins the 44 GA build.
+url: https://download.fedoraproject.org/pub/fedora/linux/releases/44/Cloud/x86_64/images/Fedora-Cloud-Base-Generic-44-1.7.x86_64.qcow2
+format: qcow2
+ostype: Fedora_64
+# Guest additions come from RPM Fusion, not the default repos: no /work share.
+packages: []

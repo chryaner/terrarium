@@ -1,0 +1,10 @@
+name: debian-13
+# "generic", not "genericcloud": the genericcloud image carries Debian's
+# stripped cloud kernel, which lacks the drivers to boot on VirtualBox and
+# hangs in the initramfs.
+url: https://cloud.debian.org/images/cloud/trixie/latest/debian-13-generic-amd64.qcow2
+format: qcow2
+ostype: Debian_64
+# virtualbox-guest-utils lives in contrib, which the cloud image's sources do
+# not enable: no /work share on this image.
+packages: []

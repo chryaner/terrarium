@@ -1,0 +1,7 @@
+name: alma-9
+url: https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2
+format: qcow2
+ostype: RedHat_64
+# VirtualBox guest additions are not in the EL9 base repos, so there is no
+# vboxsf mount helper: the /work share is unavailable on this image.
+packages: []

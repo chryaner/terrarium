@@ -1,0 +1,8 @@
+/terrarium.exe
+/terrarium
+dist/
+*.test
+.vscode/
+.idea/
+*.exe~
+dist/
