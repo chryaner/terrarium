@@ -134,32 +134,19 @@ back, `revert` resets it.
 $ claude mcp add terrarium -- terrarium mcp
 ```
 
-The same binary is an MCP server: everything above as tools, plus screenshot,
-keyboard and mouse injection. On connect it tells the agent to run `doctor`
-first and to report what is missing instead of flailing. A disposable VM is a
-good place to let an agent work: a real kernel, and nothing it does escapes
-the fork, because `revert` un-happens everything.
+The same binary is an MCP server: every command above as a tool, plus
+`screenshot`, `click`, `scroll`, `type`, and `keys` - screen, mouse and
+keyboard injected through the hypervisor, so nothing is installed in the guest
+and no network or guest additions are needed. That is how an agent drives an
+installer, a login screen, or an OS too old for SSH - exactly what the
+Minesweeper recording above shows. On connect the server tells the agent to run
+`doctor` first and report what is missing instead of flailing.
 
 - "Fork a clean env, build the project in it, tell me what the README missed."
 - "Install our app on the Windows env and screenshot each step."
 
-### Drive guests that have no SSH
-
-`screenshot`, `click`, `scroll`, `type`, and `keys` drive the screen, mouse
-and keyboard through the hypervisor - nothing installed in the guest, no
-network needed, no guest additions.
-This is how you get through an installer, a boot loader, a login screen, or an
-OS too old to help, and how an agent drives a machine before it can even log
-in. The mouse is the one thing `VBoxManage` has no verb for, so `click` and
-`scroll` talk to VirtualBox's COM API directly; everything else shells out.
 For Windows guests with SSH, `terrarium rdp` opens a full desktop already
 logged in.
-
-The agent recording above is exactly that: a live session where Claude played
-Minesweeper on a Windows XP fork - an OS no modern agent tooling can reach -
-deciding every click from the previous screenshot. It cleared the board with
-no losses and no guessing, landed on XP's own fastest-time leaderboard, then
-ran `revert`, and even the high score never happened. Nothing was scripted.
 
 ## Install
 
@@ -179,8 +166,7 @@ $ terrarium doctor
 ```
 
 Linux images download themselves. Windows images build from an installation
-ISO you download yourself, since Microsoft's media cannot be redistributed -
-see [Images](#images) for where to put it.
+ISO you provide - see [Images](#images) for where to put it and why.
 
 ## Quick start
 
