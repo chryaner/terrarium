@@ -80,22 +80,24 @@ guest's video memory, and a timer that shows real wall-clock seconds.
 
 ### How it compares
 
-|                                          | **terrarium** | Docker | Vagrant | Hyper-V | Multipass | WSL2 |
-| ---------------------------------------- | :-----------: | :----: | :-----: | :-----: | :-------: | :--: |
-| a real, whole machine (its own kernel)   |      ✅       |   ❌   |   ✅    |   ✅    |    ✅     |  ❌  |
-| Windows guests                           |      ✅       |   ❌   |   ✅    |   ✅    |    ❌     |  ❌  |
-| legacy guests (XP era)                   |      ✅       |   ❌   |   ❌    |   ❌    |    ❌     |  ❌  |
-| new machine in one command, seconds      |      ✅       |   ✅   |   ❌    |   ❌    |    ❌     |  ❌  |
-| reset to clean state in seconds          |      ✅       |   ✅   |   ❌    |   ❌    |    ❌     |  ❌  |
-| environment shared as a small text file  |      ✅       |   ✅   |   ✅    |   ❌    |    ❌     |  ❌  |
-| drives GUI-only guests (screen, mouse)   |      ✅       |   ❌   |   ❌    |   ❌    |    ❌     |  ❌  |
-| AI agent tools built in (MCP)            |      ✅       |   ❌   |   ❌    |   ❌    |    ❌     |  ❌  |
-| production workloads                     |      ❌       |   ✅   |   ❌    |   ✅    |    ❌     |  ❌  |
-| runs on any host OS                      |      ❌       |   ✅   |   ✅    |   ❌    |    ✅     |  ❌  |
+|                                          | **terrarium** | Docker | VirtualBox | Vagrant | Hyper-V | Multipass | WSL2 |
+| ---------------------------------------- | :-----------: | :----: | :--------: | :-----: | :-----: | :-------: | :--: |
+| a real, whole machine (its own kernel)   |      ✅       |   ❌   |     ✅     |   ✅    |   ✅    |    ✅     |  ❌  |
+| Windows guests                           |      ✅       |   ❌   |     ✅     |   ✅    |   ✅    |    ❌     |  ❌  |
+| legacy guests (XP era)                   |      ✅       |   ❌   |     ✅     |   ❌    |   ❌    |    ❌     |  ❌  |
+| new machine in one command, seconds      |      ✅       |   ✅   |     ❌     |   ❌    |   ❌    |    ❌     |  ❌  |
+| reset to clean state in seconds          |      ✅       |   ✅   |     ❌     |   ❌    |   ❌    |    ❌     |  ❌  |
+| environment shared as a small text file  |      ✅       |   ✅   |     ❌     |   ✅    |   ❌    |    ❌     |  ❌  |
+| drives GUI-only guests (screen, mouse)   |      ✅       |   ❌   |     ❌     |   ❌    |   ❌    |    ❌     |  ❌  |
+| AI agent tools built in (MCP)            |      ✅       |   ❌   |     ❌     |   ❌    |   ❌    |    ❌     |  ❌  |
+| production workloads                     |      ❌       |   ✅   |     ❌     |   ❌    |   ✅    |    ❌     |  ❌  |
+| runs on any host OS                      |      ❌       |   ✅   |     ✅     |   ✅    |   ❌    |    ✅     |  ❌  |
 
 If your work fits in a container, use Docker. When it needs a real, whole
 machine you can break and un-break - and the last two rows are prices you can
-pay - the first column is the point of this project.
+pay - the first column is the point of this project. VirtualBox gets its own
+column on purpose: terrarium runs on it, so the green half of that column is
+the engine, and the red half is what this project adds.
 
 ### A dev environment per project
 
