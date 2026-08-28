@@ -28,6 +28,21 @@ Do it from the command line, or hand the same power to an AI agent over MCP. It
 ships no virtualization code, wraps `VBoxManage`, and never touches a VM it did
 not create.
 
+What people use it for:
+
+- **Set the goal, walk away.** Give an agent a real disposable machine over MCP
+  and a goal; it builds, fails, reverts, and retries on its own, unsupervised, all
+  the way to installing something end to end - and the task can involve the screen,
+  not just the command line.
+- **Let an agent test an install end to end** on a real machine, from first boot
+  to a working app.
+- **Let an agent write a guide or reproduce a bug** and hand back a step-by-step
+  screenshot trail or a GIF, exactly like the recordings in this README.
+- **Isolated, disposable, real.** Do sensitive or risky work on a machine you can
+  throw away, so it never touches your own.
+- **Clean-machine testing.** Run your installer or build on a machine that has
+  never seen your dev setup, and "works on my machine" stops being an argument.
+
 ## Contents
 
 - [Features](#features)
