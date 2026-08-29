@@ -1,0 +1,15 @@
+{
+    "version": "0.1.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/chryaner/terrarium/releases/download/v0.1.0/terrarium_0.1.0_windows_amd64.zip",
+            "bin": [
+                "terrarium.exe"
+            ],
+            "hash": "113757aa126c997d127acc1777907344c6f6b89bd049b98be05443f1fa76edb5"
+        }
+    },
+    "homepage": "https://github.com/chryaner/terrarium",
+    "license": "Apache-2.0",
+    "description": "Real, disposable computers in seconds, for you and your AI agent."
+}
