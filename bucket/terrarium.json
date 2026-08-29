@@ -1,12 +1,12 @@
 {
-    "version": "0.1.0",
+    "version": "0.1.1",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/chryaner/terrarium/releases/download/v0.1.0/terrarium_0.1.0_windows_amd64.zip",
+            "url": "https://github.com/chryaner/terrarium/releases/download/v0.1.1/terrarium_0.1.1_windows_amd64.zip",
             "bin": [
                 "terrarium.exe"
             ],
-            "hash": "113757aa126c997d127acc1777907344c6f6b89bd049b98be05443f1fa76edb5"
+            "hash": "3e489374573a27f27dec11a5c18d80d0aef834e0a95bfa33bb99fbb3ee7aca35"
         }
     },
     "homepage": "https://github.com/chryaner/terrarium",
