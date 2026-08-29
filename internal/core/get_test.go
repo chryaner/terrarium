@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/chryaner/terrarium/internal/recipe"
 )
@@ -228,5 +233,70 @@ func TestProgressReported(t *testing.T) {
 	}
 	if !strings.Contains(lines[0], "/") {
 		t.Errorf("progress should show total when known, got %q", lines[0])
+	}
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
+
+// The idle timer is a deadline on making *no* progress, not on total duration:
+// a steady transfer, however slow per read, must pass through untouched and
+// never close the body. OneByteReader forces many reads so the per-read Reset
+// is exercised too.
+func TestStallReaderPassesActiveTransfer(t *testing.T) {
+	const payload = "the quick brown fox jumps over the lazy dog"
+	var closed atomic.Bool
+	sr := &stallReader{
+		r:     iotest.OneByteReader(strings.NewReader(payload)),
+		idle:  10 * time.Second, // never fires: every read has data ready
+		close: func() error { closed.Store(true); return nil },
+	}
+
+	got, err := io.ReadAll(sr)
+	if err != nil {
+		t.Fatalf("a steady transfer must not error: %v", err)
+	}
+	if string(got) != payload {
+		t.Errorf("got %q, want %q", got, payload)
+	}
+	if closed.Load() {
+		t.Error("close must not be called on a healthy transfer")
+	}
+}
+
+// A CDN that accepts the connection then goes silent would hang get forever.
+// After idle with no progress, stallReader closes the body (which unblocks the
+// parked read) and fails with a giving-up error. The safety timeout keeps a
+// broken stallReader from hanging this test instead of failing it.
+func TestStallReaderAbortsOnIdle(t *testing.T) {
+	unblock := make(chan struct{})
+	r := readerFunc(func([]byte) (int, error) {
+		select {
+		case <-unblock:
+			return 0, errors.New("body closed")
+		case <-time.After(2 * time.Second):
+			return 0, errors.New("SAFETY-TIMEOUT")
+		}
+	})
+	var closes atomic.Int32
+	sr := &stallReader{
+		r:     r,
+		idle:  20 * time.Millisecond,
+		close: func() error { closes.Add(1); close(unblock); return nil },
+	}
+
+	_, err := sr.Read(make([]byte, 8))
+	if err == nil {
+		t.Fatal("a stalled read must return an error")
+	}
+	if strings.Contains(err.Error(), "SAFETY-TIMEOUT") {
+		t.Fatal("stallReader never tripped its idle timer")
+	}
+	if !strings.Contains(err.Error(), "giving up") {
+		t.Errorf("want the giving-up error, got %v", err)
+	}
+	if n := closes.Load(); n != 1 {
+		t.Errorf("body should be closed exactly once, was closed %d times", n)
 	}
 }
