@@ -62,12 +62,29 @@ var singles = []keyDef{
 	{"win", 0x5b, true},
 }
 
-// letters exist only so the combos below can reach them.
-var letters = map[string]keyDef{
-	"a": {"a", 0x1e, false},
-	"c": {"c", 0x2e, false},
-	"v": {"v", 0x2f, false},
-	"z": {"z", 0x2c, false},
+// The three letter rows are contiguous runs of scancodes in keyboard order,
+// so the run is the table. Letters are never offered on their own - typing is
+// the type command's job - they exist only so the combos below can reach them.
+var letterRows = []struct {
+	row   string
+	first byte
+}{
+	{"qwertyuiop", 0x10},
+	{"asdfghjkl", 0x1e},
+	{"zxcvbnm", 0x2c},
+}
+
+var letters = letterDefs()
+
+func letterDefs() map[string]keyDef {
+	m := make(map[string]keyDef, 26)
+	for _, r := range letterRows {
+		for i := 0; i < len(r.row); i++ {
+			name := r.row[i : i+1]
+			m[name] = keyDef{name, r.first + byte(i), false}
+		}
+	}
+	return m
 }
 
 type comboDef struct {
@@ -80,16 +97,26 @@ var combos = []comboDef{
 	{"alt-tab", []byte{altCode}, "tab"},
 	{"alt-f4", []byte{altCode}, "f4"},
 	{"ctrl-alt-del", []byte{ctrlCode, altCode}, "delete"},
-	{"ctrl-a", []byte{ctrlCode}, "a"},
-	{"ctrl-c", []byte{ctrlCode}, "c"},
-	{"ctrl-v", []byte{ctrlCode}, "v"},
-	{"ctrl-z", []byte{ctrlCode}, "z"},
+}
+
+// ctrlCombos is every ctrl-<letter>. A console needs ctrl-x and ctrl-d as much
+// as it needs ctrl-c, and picking favourites is how ctrl-x came to be missing
+// when a GRUB prompt wanted it.
+func ctrlCombos() []comboDef {
+	out := make([]comboDef, 0, 26)
+	for _, r := range letterRows {
+		for i := 0; i < len(r.row); i++ {
+			l := r.row[i : i+1]
+			out = append(out, comboDef{"ctrl-" + l, []byte{ctrlCode}, l})
+		}
+	}
+	return out
 }
 
 var table = buildTable()
 
 func buildTable() map[string][]string {
-	t := make(map[string][]string, len(singles)+len(combos))
+	t := make(map[string][]string, len(singles)+len(combos)+26)
 	byName := map[string]keyDef{}
 	for _, k := range singles {
 		byName[k.name] = k
@@ -99,7 +126,8 @@ func buildTable() map[string][]string {
 		byName[name] = k
 	}
 
-	for _, c := range combos {
+	// Fresh slice: appending to combos itself would be a shared-array trap.
+	for _, c := range append(ctrlCombos(), combos...) {
 		k, ok := byName[c.key]
 		if !ok {
 			panic("keys: combo " + c.name + " references unknown key " + c.key)
@@ -135,7 +163,8 @@ func breakCodes(k keyDef) []string {
 
 func hex(b byte) string { return fmt.Sprintf("%02x", b) }
 
-// Names lists every key name, sorted, for help text and error messages.
+// Names lists every key name, sorted. This is the whole truth, which is what
+// an error about a wrong name owes the reader.
 func Names() []string {
 	names := make([]string, 0, len(table))
 	for name := range table {
@@ -143,6 +172,28 @@ func Names() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// ctrlRun stands in for the twenty-six ctrl chords wherever listing them all
+// would be noise. It is a description, not a key name: Sequences wants the
+// real thing.
+const ctrlRun = "ctrl-a..ctrl-z"
+
+// Summary is Names with the ctrl-<letter> chords collapsed into that one
+// entry, for help text and tool descriptions a reader has to get past every
+// time.
+func Summary() []string {
+	out := []string{ctrlRun}
+	for _, name := range Names() {
+		// The generated chords are ctrl- plus one letter. ctrl-alt-del is
+		// longer and stays listed.
+		if strings.HasPrefix(name, "ctrl-") && len(name) == len("ctrl-")+1 {
+			continue
+		}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Sequences flattens key names into the scancodes for one VBoxManage call, so

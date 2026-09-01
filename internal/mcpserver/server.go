@@ -97,6 +97,8 @@ func newServer() *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_exec",
 		Description: "Run a shell command inside an environment over SSH and return its exit code and output. " +
+			"The command is one shell string: pipes, redirects, globs and quoting are interpreted by the " +
+			"guest shell, unlike the CLI's `terrarium exec`, which passes its arguments literally. " +
 			"The environment must be running. Commands run as a user with passwordless sudo, so this can " +
 			"change or destroy anything inside the guest - the host is not affected. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +
@@ -122,7 +124,8 @@ func newServer() *mcp.Server {
 		Name: "env_keys",
 		Description: "Press keys and chords in the environment that env_type cannot express. Each entry in the " +
 			"list is one keystroke, and chords land as chords. The environment must be running. " +
-			"Valid key names: " + strings.Join(keys.Names(), ", ") + ". " +
+			"Valid key names: " + strings.Join(keys.Summary(), ", ") + " (the ctrl run is literal: ctrl-x, " +
+			"ctrl-d and so on). " +
 			"For the mouse, use env_click and env_scroll.",
 	}, envKeys)
 

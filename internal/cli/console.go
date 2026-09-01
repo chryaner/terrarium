@@ -100,7 +100,7 @@ var keysCmd = &cobra.Command{
 	Short: "Press keys in the guest",
 	Long: `Sends key presses to the guest's keyboard. Chords land as chords.
 
-Valid keys: ` + strings.Join(keys.Names(), ", "),
+Valid keys: ` + strings.Join(keys.Summary(), ", "),
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e, err := core.NewEngine()
