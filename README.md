@@ -183,6 +183,10 @@ $ terrarium rm t1
 marks an env to expire, and `terrarium gc` removes the expired ones (and any
 whose VM you deleted by hand).
 
+Running terrarium from git-bash? MSYS rewrites absolute paths in arguments
+(`/etc/hosts` becomes `C:/Program Files/Git/etc/hosts`) before terrarium ever
+sees them - prefix the command with `MSYS_NO_PATHCONV=1` to stop it.
+
 ## How fast
 
 | operation                               | measured   |
