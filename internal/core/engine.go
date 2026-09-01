@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/chryaner/terrarium/internal/sshx"
@@ -144,7 +145,9 @@ type ForkOpts struct {
 
 // Fork creates a disposable env from a golden: linked clone, NAT port
 // forward, boot, wait for sshd, then an online snapshot so revert resumes
-// from RAM in seconds instead of rebooting.
+// from RAM in seconds instead of rebooting. Anything that fails once the clone
+// is registered is rolled back, so a failed fork leaves no half-built env
+// behind and returns a nil Env.
 func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string)) (*Env, error) {
 	g := e.St.Goldens[golden]
 	if g == nil {
@@ -164,11 +167,14 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 	}
 
 	progress(fmt.Sprintf("cloning %s@%s -> %s", g.VMName, g.Snapshot, vmName))
+	// The one mutating step with nothing to roll back: no record exists yet,
+	// and a failed clonevm removes the half-registered clone itself.
 	if err := e.VB.CloneLinked(g.VMName, g.Snapshot, vmName); err != nil {
 		return nil, err
 	}
 
-	// Recorded before boot so `terrarium rm` can clean up a failed fork.
+	// Recorded before boot so the rollback below has something to remove, and
+	// so `terrarium rm` can still reach the VM if the process dies first.
 	env := &Env{
 		VMName:  vmName,
 		Golden:  golden,
@@ -184,34 +190,100 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 	}
 	e.St.Envs[name] = env
 	if err := e.St.Save(); err != nil {
-		return nil, err
+		return nil, e.rollbackFork(name, vmName, err, progress)
 	}
+	if err := e.prepareFork(g, env, opts, progress); err != nil {
+		return nil, e.rollbackFork(name, vmName, err, progress)
+	}
+	return env, nil
+}
 
-	if err := e.VB.SetNATSSH(vmName, port); err != nil {
-		return env, err
+// needsDiscard reports whether a machine has a saved RAM image that has to go
+// before anything can reconfigure or unregister it. A clone of an online
+// snapshot - one taken while the machine ran, which is what `adopt` often
+// finds on a user's own VM - comes up Saved, and VirtualBox refuses modifyvm
+// and unregistervm in that state. VirtualBox 7 reports aborted-saved for a VM
+// process that died holding one, which is refused the same way; savingstate is
+// a save in progress and is not ours to throw away.
+func needsDiscard(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "saved", "aborted-saved":
+		return true
+	}
+	return false
+}
+
+// stopForUnregister takes a VM to the only state unregistervm accepts: off,
+// and holding no saved RAM image. Every path that unregisters needs it, not
+// just the fork rollback - a Revert whose restore lands on an online snapshot
+// and whose start then fails parks the env Saved, and WaitOff counts saved as
+// down. A VM someone deleted outside terrarium reports gone: nothing left to
+// stop, and nothing to unregister either. Problems are collected rather than
+// returned one at a time, so a caller that pushes through cleanup can report
+// them all and one that stops takes the first.
+func (e *Engine) stopForUnregister(vmName string) (gone bool, problems []error) {
+	if err := e.VB.PowerOff(vmName); err != nil {
+		if vbox.IsNotRegistered(err) {
+			return true, nil
+		}
+		problems = append(problems, err)
+	}
+	if err := e.VB.WaitOff(vmName, 30*time.Second); err != nil {
+		if vbox.IsNotRegistered(err) {
+			return true, problems
+		}
+		problems = append(problems, err)
+	}
+	if state, err := e.VB.VMState(vmName); err == nil && needsDiscard(state) {
+		if err := e.VB.DiscardState(vmName); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	return false, problems
+}
+
+// prepareFork configures and boots a clone that is already registered and
+// recorded. Every error it returns is rolled back by Fork, so it cleans up
+// nothing itself.
+func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(string)) error {
+	vmName := env.VMName
+	state, err := e.VB.VMState(vmName)
+	if err != nil {
+		return err
+	}
+	if needsDiscard(state) {
+		// Costs a cold boot instead of resuming the golden's RAM: the only way
+		// to get a mutable machine out of an online snapshot.
+		progress("clone came up saved (online snapshot): discarding saved state, it will cold boot")
+		if err := e.VB.DiscardState(vmName); err != nil {
+			return err
+		}
+	}
+	if err := e.VB.SetNATSSH(vmName, env.SSHPort); err != nil {
+		return err
 	}
 	if err := e.VB.ModifyCPUMem(vmName, opts.CPUs, opts.MemMB); err != nil {
-		return env, err
+		return err
 	}
 	// Forks inherit the golden's pointing hardware, PS/2-only on most images.
 	// Absolute mouse injection (click) needs a USB tablet, and it has to land
 	// before the clean snapshot so revert keeps the mouse.
 	if err := e.VB.EnableMouseTablet(vmName); err != nil {
-		return env, err
+		return err
 	}
 	// Attached before the clean snapshot, so revert keeps the share.
 	if opts.ShareHostPath != "" {
 		if err := e.VB.SharedFolderAdd(vmName, ShareName, opts.ShareHostPath); err != nil {
-			return env, err
+			return err
 		}
 	}
 	progress("booting")
 	if err := e.VB.StartHeadless(vmName); err != nil {
-		return env, err
+		return err
 	}
 	if g.hasCreds() {
-		if err := sshx.WaitReady(port, bootTimeout); err != nil {
-			return env, err
+		if err := sshx.WaitReady(env.SSHPort, bootTimeout); err != nil {
+			return err
 		}
 	} else {
 		progress(credlessNote)
@@ -220,10 +292,46 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 		time.Sleep(settleTime)
 	}
 	progress("snapshotting clean state (revert target)")
-	if err := e.VB.TakeSnapshot(vmName, cleanSnapshot); err != nil {
-		return env, err
+	return e.VB.TakeSnapshot(vmName, cleanSnapshot)
+}
+
+// rollbackFork undoes a fork that failed after its clone was registered: the
+// VM goes with its disks, and so does the env record. Cleanup pushes through
+// its own errors instead of returning early, because a half-cleaned fork is
+// worse than a reported one, and a VM someone deleted outside terrarium counts
+// as already cleaned. It narrates: waiting for a VM to stop and retrying a
+// locked unregister take minutes, and silence there reads as a hang.
+func (e *Engine) rollbackFork(name, vmName string, cause error, progress func(string)) error {
+	var problems []string
+	fail := func(err error) { problems = append(problems, err.Error()) }
+
+	progress("rolling back " + vmName)
+	gone, stopped := e.stopForUnregister(vmName)
+	for _, err := range stopped {
+		fail(err)
 	}
-	return env, nil
+	if !gone {
+		progress("unregistering " + vmName)
+		if err := e.VB.Unregister(vmName); err != nil && !vbox.IsNotRegistered(err) {
+			fail(err)
+		}
+	}
+	delete(e.St.Envs, name)
+	if err := e.St.Save(); err != nil {
+		fail(err)
+	}
+	return rollbackErr(cause, vmName, problems)
+}
+
+// rollbackErr reports a rolled-back failure. The cause stays wrapped and in
+// front: cleanup detail is appended to it, never substituted for it, or the
+// reason the fork failed disappears behind the tidying up.
+func rollbackErr(cause error, vmName string, problems []string) error {
+	if len(problems) == 0 {
+		return fmt.Errorf("%w (rolled back, nothing left behind)", cause)
+	}
+	return fmt.Errorf("%w\nrollback of %s did not finish (%s): remove the leftovers with `%s`",
+		cause, vmName, strings.Join(problems, "; "), vbox.ManualDeleteHint(vmName))
 }
 
 // Up brings a project's env up: starts it if it exists, forks it if it does
@@ -340,17 +448,11 @@ func (e *Engine) Remove(name string) error {
 	// A VM someone deleted outside terrarium is already in the state we are
 	// trying to reach. Without this the record is unremovable, because every
 	// call below keeps failing the same way.
-	gone := false
-	if err := e.VB.PowerOff(env.VMName); err != nil {
-		if !vbox.IsNotRegistered(err) {
-			return err
-		}
-		gone = true
+	gone, problems := e.stopForUnregister(env.VMName)
+	if len(problems) > 0 {
+		return problems[0]
 	}
 	if !gone {
-		if err := e.VB.WaitOff(env.VMName, 30*time.Second); err != nil {
-			return err
-		}
 		if err := e.VB.Unregister(env.VMName); err != nil && !vbox.IsNotRegistered(err) {
 			return err
 		}

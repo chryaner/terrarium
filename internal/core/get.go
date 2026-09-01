@@ -136,8 +136,7 @@ func (e *Engine) clearExisting(image, vmName string, force bool, progress func(s
 	progress("removing " + vmName)
 	// Best effort before unregistering: the VM is usually already off, and
 	// Unregister is the call whose failure actually matters.
-	e.VB.PowerOff(vmName)
-	e.VB.WaitOff(vmName, 30*time.Second)
+	e.stopForUnregister(vmName)
 	if err := e.VB.Unregister(vmName); err != nil {
 		return err
 	}

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/chryaner/terrarium/internal/vbox"
 )
@@ -76,15 +75,14 @@ func (e *Engine) RemoveGolden(image string) error {
 	if g.Owned {
 		// Mirror Remove: a VM already deleted outside terrarium is fine, the
 		// record still has to go.
-		if err := e.VB.PowerOff(g.VMName); err == nil {
-			if err := e.VB.WaitOff(g.VMName, 30*time.Second); err != nil {
-				return err
-			}
+		gone, problems := e.stopForUnregister(g.VMName)
+		if len(problems) > 0 {
+			return problems[0]
+		}
+		if !gone {
 			if err := e.VB.Unregister(g.VMName); err != nil && !vbox.IsNotRegistered(err) {
 				return err
 			}
-		} else if !vbox.IsNotRegistered(err) {
-			return err
 		}
 	}
 	delete(e.St.Goldens, image)

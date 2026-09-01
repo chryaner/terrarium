@@ -20,11 +20,9 @@ var forkCmd = &cobra.Command{
 			return err
 		}
 		start := time.Now()
+		// Fork cleans up after itself, so a failure here needs no rm hint.
 		env, err := e.Fork(args[0], args[1], core.ForkOpts{TTL: forkTTL}, func(msg string) { fmt.Println(msg) })
 		if err != nil {
-			if env != nil {
-				return fmt.Errorf("fork failed (clean up with `terrarium rm %s`): %w", args[1], err)
-			}
 			return err
 		}
 		// Same as the MCP env_fork tool, so the env shows up in ~/.ssh/config

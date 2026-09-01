@@ -204,5 +204,12 @@ func (s *State) Save() error {
 		os.Remove(tmp)
 		return err
 	}
+	// The snapshots have to move to what was just written, or a later delete of
+	// something this process itself created is invisible to mergeInto - not in
+	// loaded*, so nothing to remove - and the next Save writes the record
+	// straight back. That is the fork rollback path. An env another process
+	// added is in neither map either way, so it still survives the merge.
+	s.loadedGoldens = cloneGoldens(s.Goldens)
+	s.loadedEnvs = cloneEnvs(s.Envs)
 	return nil
 }

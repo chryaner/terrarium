@@ -47,9 +47,12 @@ func TestIsNotRegistered(t *testing.T) {
 	}
 }
 
-// The engine pastes this into an error message, so it has to be runnable.
+// The engine pastes this into an error message, so it has to be runnable. It
+// is printed when cleanup failed, and a machine left holding a saved state is
+// one of the ways it fails: the discard has to be part of the hint.
 func TestManualDeleteHint(t *testing.T) {
-	if got := ManualDeleteHint("trr-golden-win11"); got != "VBoxManage unregistervm trr-golden-win11 --delete-all" {
+	want := "VBoxManage discardstate trr-golden-win11; VBoxManage unregistervm trr-golden-win11 --delete-all"
+	if got := ManualDeleteHint("trr-golden-win11"); got != want {
 		t.Errorf("got %q", got)
 	}
 }

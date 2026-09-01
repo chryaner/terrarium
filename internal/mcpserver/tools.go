@@ -220,11 +220,9 @@ func envFork(ctx context.Context, _ *mcp.CallToolRequest, in envForkInput) (*mcp
 	}
 
 	var log []string
+	// Fork rolls a failure back itself, so there is nothing for env_rm to do.
 	env, err := e.Fork(in.Golden, in.Name, opts, progressTo(&log))
 	if err != nil {
-		if env != nil {
-			return nil, envOutput{}, fmt.Errorf("fork failed, clean up with env_rm %s: %w", in.Name, err)
-		}
 		return nil, envOutput{}, err
 	}
 	if err := core.UpdateSSHConfig(e.St); err != nil {

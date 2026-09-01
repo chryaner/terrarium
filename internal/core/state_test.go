@@ -120,6 +120,58 @@ func TestSaveMergesDeleteAgainstAddition(t *testing.T) {
 	}
 }
 
+// What the fork rollback needs: an env this process created, saved, and then
+// removed must be gone from the file. The delete is measured against what the
+// last Save wrote, not against what LoadState happened to read.
+func TestSaveDeletesEnvItCreated(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	s, _ := LoadState()
+	s.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	delete(s.Envs, "a")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	final, _ := LoadState()
+	if final.Envs["a"] != nil {
+		t.Error("an env created and then rolled back in one process must not stay on disk")
+	}
+}
+
+// The same delete must still leave another process's work alone: an env added
+// between our two saves is ours neither to write nor to remove.
+func TestSaveDeleteSpareConcurrentAddition(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	s, _ := LoadState()
+	s.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	other, _ := LoadState() // a second process, after our first save
+	other.Envs["b"] = &Env{VMName: "trr-b", Golden: "g", SSHPort: 42201}
+	if err := other.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	delete(s.Envs, "a")
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	final, _ := LoadState()
+	if final.Envs["a"] != nil {
+		t.Error("env a should have been deleted")
+	}
+	if final.Envs["b"] == nil {
+		t.Error("env b was added by another process and must survive our delete")
+	}
+}
+
 // An edit to a field must be written, while an env the process never touched
 // keeps whatever the current file holds.
 func TestSaveWritesOwnEditsOnly(t *testing.T) {

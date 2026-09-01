@@ -32,11 +32,10 @@ already there.`,
 		}
 
 		start := time.Now()
+		// A failed fork rolls itself back inside the engine, so there is no
+		// half-built env to tell the user about.
 		env, existed, err := e.Up(p, func(msg string) { fmt.Println(msg) })
 		if err != nil {
-			if env != nil && !existed {
-				return fmt.Errorf("up failed (clean up with `terrarium rm %s`): %w", p.Name, err)
-			}
 			return err
 		}
 		if err := core.UpdateSSHConfig(e.St); err != nil {

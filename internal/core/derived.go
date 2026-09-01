@@ -49,11 +49,10 @@ func (e *Engine) getDerived(r recipe.Recipe, image string, cpus, memMB int, forc
 		return nil, fmt.Errorf("env %q already exists (a failed build leaves it for inspection): `terrarium rm %s` and retry", scratch, scratch)
 	}
 	progress(fmt.Sprintf("forking %s to run setup in", r.From))
+	// A failed fork rolls itself back, so there is no scratch env left to hint
+	// about here. A failed setup below is a different matter: that env is kept.
 	env, err := e.Fork(r.From, scratch, ForkOpts{CPUs: cpus, MemMB: memMB}, progress)
 	if err != nil {
-		if env != nil {
-			return nil, fmt.Errorf("%w\nclean up with `terrarium rm %s`", err, scratch)
-		}
 		return nil, err
 	}
 	if err := e.runSetup(r, env, progress); err != nil {

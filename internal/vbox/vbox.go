@@ -101,9 +101,13 @@ func isLockErr(err error) bool {
 
 // ManualDeleteHint is the command a user runs to clear up a VM terrarium has
 // deliberately left behind. It lives here because the exact syntax is the
-// driver's business, not the engine's.
+// driver's business, not the engine's. discardstate comes first because
+// unregistervm refuses a machine still holding a saved RAM image, and this
+// hint is printed exactly when automatic cleanup failed - which includes the
+// discard failing. The two are separated by `;`, not `&&`: discardstate errors
+// on a machine that has no saved state, and the unregister must still run.
 func ManualDeleteHint(vm string) string {
-	return fmt.Sprintf("VBoxManage unregistervm %s --delete-all", vm)
+	return fmt.Sprintf("VBoxManage discardstate %s; VBoxManage unregistervm %s --delete-all", vm, vm)
 }
 
 // IsNotRegistered reports that VirtualBox has never heard of the VM - someone
@@ -172,6 +176,21 @@ func (c *Client) VMState(vm string) (string, error) {
 		return s, nil
 	}
 	return "", fmt.Errorf("no VMState in showvminfo output for %s", vm)
+}
+
+// OSType is the guest type recorded for a VM. VirtualBox reports the
+// description here ("Windows 10 (64-bit)"), not the id createvm takes
+// (Windows10_64), and a clone inherits whatever its source had.
+func (c *Client) OSType(vm string) (string, error) {
+	out, err := c.run("showvminfo", vm, "--machinereadable")
+	if err != nil {
+		return "", err
+	}
+	kv := parseMachineReadable(out)
+	if s, ok := kv["ostype"]; ok {
+		return s, nil
+	}
+	return "", fmt.Errorf("no ostype in showvminfo output for %s", vm)
 }
 
 func (c *Client) HasSnapshot(vm, name string) (bool, error) {
@@ -543,6 +562,17 @@ func (c *Client) PowerOff(vm string) error {
 	return err
 }
 
+// DiscardState throws away a machine's saved RAM image, leaving it powered off
+// and mutable. A clone of an online snapshot arrives Saved, and VirtualBox
+// refuses both modifyvm and unregistervm on a machine in that state. The guest
+// cold-boots afterwards instead of resuming.
+func (c *Client) DiscardState(vm string) error {
+	return c.retryLocked(5, func() error {
+		_, err := c.run("discardstate", vm)
+		return err
+	})
+}
+
 // WaitOff blocks until the VM is powered down, then briefly longer: the
 // session lock outlives the state change and blocks snapshot/unregister.
 func (c *Client) WaitOff(vm string, timeout time.Duration) error {
@@ -553,7 +583,7 @@ func (c *Client) WaitOff(vm string, timeout time.Duration) error {
 			return err
 		}
 		switch state {
-		case "poweroff", "aborted", "saved":
+		case "poweroff", "aborted", "saved", "aborted-saved":
 			time.Sleep(1500 * time.Millisecond)
 			return nil
 		}
