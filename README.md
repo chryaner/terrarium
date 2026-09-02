@@ -130,11 +130,8 @@ back, `revert` resets it.
 
 ### Your AI agent gets real computers
 
-```console
-$ claude mcp add terrarium -- terrarium mcp
-```
-
-The same binary is an MCP server: every command above as a tool, plus
+Setup is one command - see [Install](#install). The same binary is an MCP
+server: every command above as a tool, plus
 `screenshot`, `click`, `scroll`, `type`, and `keys` - screen, mouse and
 keyboard injected through the hypervisor, so nothing is installed in the guest
 and no network or guest additions are needed. That is how an agent drives an
@@ -150,20 +147,55 @@ logged in.
 
 ## Install
 
-```console
-$ scoop bucket add terrarium https://github.com/chryaner/terrarium
-$ scoop install terrarium
+terrarium is a single Windows binary. It needs a **Windows host** with
+[VirtualBox](https://www.virtualbox.org/) 7.x (`VBoxManage` on `PATH`).
+
+### Give your AI agent real computers (Claude Code)
+
+One command, nothing to install first: `npx` fetches the package with the
+binary inside.
+
+```powershell
+claude mcp add terrarium -- npx -y terrarium-mcp mcp
 ```
 
-Or, with Go >= 1.25, `go install github.com/chryaner/terrarium/cmd/terrarium@latest`,
-or `go build -o terrarium ./cmd/terrarium` from a clone.
+Start a new Claude Code session and the terrarium tools are there. The same
+package runs the CLI: `npx -y terrarium-mcp doctor`.
 
-Requires a Windows host with [VirtualBox](https://www.virtualbox.org/) 7.x
-(`VBoxManage` on `PATH`). Then check the machine is ready:
+### Install the CLI with Scoop
 
-```console
-$ terrarium doctor
+For `terrarium` on your `PATH` without Node. If you do not have
+[Scoop](https://scoop.sh) yet, from a normal (non-admin) PowerShell:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+Invoke-RestMethod -Uri https://get.scoop.sh | Invoke-Expression
 ```
+
+Then:
+
+```powershell
+scoop bucket add terrarium https://github.com/chryaner/terrarium
+scoop install terrarium
+```
+
+If you installed Scoop in this same window, its shims are not on the current
+shell's `PATH` yet, so `terrarium` will not be found. Open a new terminal, or
+refresh `PATH` in place:
+
+```powershell
+$env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
+```
+
+Prefer Go (>= 1.25)? `go install github.com/chryaner/terrarium/cmd/terrarium@latest`.
+
+### Check the host
+
+```powershell
+terrarium doctor
+```
+
+`doctor` confirms VirtualBox is reachable and names anything missing.
 
 Linux images download themselves. Windows images build from an installation
 ISO you provide - see [Images](#images) for where to put it and why.
