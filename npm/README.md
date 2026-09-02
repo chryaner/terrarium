@@ -10,7 +10,7 @@ Requires a Windows host with [VirtualBox](https://www.virtualbox.org/) 7.x.
 Give your agent real machines (Claude Code):
 
 ```
-claude mcp add terrarium -- npx -y terrarium-mcp mcp
+claude mcp add -s user terrarium -- npx -y terrarium-mcp mcp
 ```
 
 Use the CLI:

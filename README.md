@@ -15,6 +15,54 @@ the time it takes to read this.
 
 </div>
 
+## Get started
+
+You need a Windows host with [VirtualBox](https://www.virtualbox.org/) 7.x.
+Do not have it yet?
+
+```powershell
+winget install Oracle.VirtualBox
+```
+
+### With Claude Code
+
+One command. `npx` fetches the package with the terrarium binary inside, so
+there is nothing else to install:
+
+```powershell
+claude mcp add -s user terrarium -- npx -y terrarium-mcp mcp
+```
+
+Open a new Claude Code session and ask for a machine:
+
+> Fork a fresh debian-12 machine, run `uname -a` in it, then delete it.
+
+The agent checks the host, downloads the image, builds it, forks it, and
+reports back. Linux images download themselves; a Windows machine needs an
+installation ISO from you, once - see [Images](#images).
+
+### From the command line
+
+```powershell
+npm i -g terrarium-mcp
+```
+
+Then:
+
+```console
+$ terrarium doctor                 # can it talk to VirtualBox?
+$ terrarium get debian-12          # download the image, boot it once, snapshot it (~1 min)
+$ terrarium fork debian-12 t1      # a throwaway machine, SSH-ready in ~20s
+$ terrarium exec t1 -- uname -a
+$ terrarium revert t1              # back to clean in seconds
+```
+
+`ssh t1` opens a shell, `rm t1` deletes the machine, `down` and `start` park
+and wake it. `fork --ttl 2h` marks an env to expire and `terrarium gc` removes
+the expired ones.
+
+No Node? [Install](#install) covers Scoop, Go, and other MCP clients.
+
 ## Why
 
 Containers are the right way to ship a Linux service and the wrong way to test a
@@ -45,9 +93,9 @@ What people use it for:
 
 ## Contents
 
+- [Get started](#get-started)
 - [Features](#features)
 - [Install](#install)
-- [Quick start](#quick-start)
 - [How fast](#how-fast)
 - [Images](#images)
 - [What it is not](#what-it-is-not)
@@ -130,8 +178,8 @@ back, `revert` resets it.
 
 ### Your AI agent gets real computers
 
-Setup is one command - see [Install](#install). The same binary is an MCP
-server: every command above as a tool, plus
+Setup is one command - see [Get started](#get-started). The same binary is an
+MCP server: every command above as a tool, plus
 `screenshot`, `click`, `scroll`, `type`, and `keys` - screen, mouse and
 keyboard injected through the hypervisor, so nothing is installed in the guest
 and no network or guest additions are needed. That is how an agent drives an
@@ -147,25 +195,14 @@ logged in.
 
 ## Install
 
-terrarium is a single Windows binary. It needs a **Windows host** with
-[VirtualBox](https://www.virtualbox.org/) 7.x (`VBoxManage` on `PATH`).
+[Get started](#get-started) has the two fast paths. Everything else about
+installing is here. terrarium is a single Windows binary; VirtualBox 7.x is
+the only thing it needs on the host.
 
-### Give your AI agent real computers (Claude Code)
+### Scoop (no Node needed)
 
-One command, nothing to install first: `npx` fetches the package with the
-binary inside.
-
-```powershell
-claude mcp add terrarium -- npx -y terrarium-mcp mcp
-```
-
-Start a new Claude Code session and the terrarium tools are there. The same
-package runs the CLI: `npx -y terrarium-mcp doctor`.
-
-### Install the CLI with Scoop
-
-For `terrarium` on your `PATH` without Node. If you do not have
-[Scoop](https://scoop.sh) yet, from a normal (non-admin) PowerShell:
+If you do not have [Scoop](https://scoop.sh) yet, from a normal (non-admin)
+PowerShell:
 
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
@@ -187,37 +224,45 @@ refresh `PATH` in place:
 $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Environment]::GetEnvironmentVariable('Path','Machine')
 ```
 
-Prefer Go (>= 1.25)? `go install github.com/chryaner/terrarium/cmd/terrarium@latest`.
+The Scoop binary is the same MCP server:
+`claude mcp add -s user terrarium -- terrarium mcp`.
 
-### Check the host
+### Go
 
 ```powershell
-terrarium doctor
+go install github.com/chryaner/terrarium/cmd/terrarium@latest
 ```
 
-`doctor` confirms VirtualBox is reachable and names anything missing.
+### Run it without installing
 
-Linux images download themselves. Windows images build from an installation
-ISO you provide - see [Images](#images) for where to put it and why.
+`npx` runs the CLI straight from the package cache:
+`npx -y terrarium-mcp doctor`.
 
-## Quick start
+### Other MCP clients
 
-```console
-$ terrarium get debian-12          # build a golden: download, boot, snapshot (~40s)
-$ terrarium fork debian-12 t1      # a throwaway machine, SSH-ready in ~20s
-$ terrarium exec t1 -- uname -a
-$ terrarium ssh t1
-$ terrarium revert t1              # back to clean in seconds
-$ terrarium rm t1
+Any client that launches stdio servers takes the same command. In JSON form:
+
+```json
+{
+  "mcpServers": {
+    "terrarium": {
+      "command": "npx",
+      "args": ["-y", "terrarium-mcp", "mcp"]
+    }
+  }
+}
 ```
 
-`down` and `start` park and wake an env without losing it. `fork --ttl 2h`
-marks an env to expire, and `terrarium gc` removes the expired ones (and any
-whose VM you deleted by hand).
+### Updating
 
-Running terrarium from git-bash? MSYS rewrites absolute paths in arguments
-(`/etc/hosts` becomes `C:/Program Files/Git/etc/hosts`) before terrarium ever
-sees them - prefix the command with `MSYS_NO_PATHCONV=1` to stop it.
+`npm update -g terrarium-mcp` or `scoop update terrarium`. `npx -y` picks up
+new versions on its own. `terrarium version` prints what you have.
+
+### git-bash
+
+MSYS rewrites absolute paths in arguments (`/etc/hosts` becomes
+`C:/Program Files/Git/etc/hosts`) before terrarium ever sees them. Prefix the
+command with `MSYS_NO_PATHCONV=1` to stop it.
 
 ## How fast
 
