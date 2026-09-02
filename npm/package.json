@@ -1,0 +1,38 @@
+{
+  "name": "terrarium-mcp",
+  "version": "0.1.1",
+  "description": "terrarium: disposable VirtualBox VMs from the CLI or over MCP, for you and your AI agent. Bundles the Windows binary.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chryaner/terrarium.git"
+  },
+  "homepage": "https://github.com/chryaner/terrarium",
+  "bugs": "https://github.com/chryaner/terrarium/issues",
+  "bin": {
+    "terrarium": "bin/terrarium.js"
+  },
+  "files": [
+    "bin/terrarium.js",
+    "dist/terrarium.exe"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "virtualbox",
+    "vm",
+    "disposable",
+    "sandbox",
+    "ai-agents",
+    "claude"
+  ]
+}
