@@ -7,3 +7,4 @@ dist/
 *.exe~
 npm/*.tgz
 npm/node_modules/
+npm/.npmrc
