@@ -5,4 +5,5 @@ dist/
 .vscode/
 .idea/
 *.exe~
-dist/
+npm/*.tgz
+npm/node_modules/
