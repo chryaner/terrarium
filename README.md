@@ -215,6 +215,11 @@ $ terrarium rm t1
 marks an env to expire, and `terrarium gc` removes the expired ones (and any
 whose VM you deleted by hand).
 
+- `exec <env> --shell powershell|cmd|sh -- <command...>` runs the command
+  under that shell instead of the one the guest's sshd would pick.
+- `exec <env> --stdin` reads a whole script from stdin and runs it in the
+  guest, so nothing in it needs escaping.
+
 Running terrarium from git-bash? MSYS rewrites absolute paths in arguments
 (`/etc/hosts` becomes `C:/Program Files/Git/etc/hosts`) before terrarium ever
 sees them - prefix the command with `MSYS_NO_PATHCONV=1` to stop it.
@@ -268,6 +273,12 @@ so you download the ISO once and terrarium runs the real installer unattended:
    `win10.iso`, `winxp.iso`.
 3. `terrarium get win10`. Fully unattended: about ten minutes for win10, seven
    for XP.
+
+A win10 golden comes out key-based like the Linux ones: the install generates
+an ed25519 pair, puts the public half in the guest and records the private
+one, so `ssh` and `scp` from the generated `~/.ssh/config` entry never prompt.
+Its SSH sessions land in PowerShell, so `exec` quotes for PowerShell rather
+than cmd.exe.
 
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
