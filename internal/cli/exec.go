@@ -18,6 +18,7 @@ var (
 	execTimeout time.Duration
 	execShell   string
 	execScript  bool
+	execKill    bool
 )
 
 var execCmd = &cobra.Command{
@@ -40,11 +41,19 @@ there its words go over as typed.
 
   --shell {powershell,cmd,sh}  run under this shell instead
   --stdin                      read a whole script from stdin and run that
+  --kill-on-timeout            kill the command in the guest when it times out
 
 --stdin takes no -- command: the script crosses as the shell's own stdin, so
 nothing in it is quoted, escaped or split on the way.
 
-  terrarium exec t1 --stdin < setup.ps1`,
+  terrarium exec t1 --stdin < setup.ps1
+
+A timeout on its own only stops waiting: the SSH session cannot be cancelled
+from here, so the command keeps running in the guest, invisibly. On Windows it
+runs in session 0, where anything that opens a dialog waits for a click nobody
+can make. --kill-on-timeout tags the command, finds the tag in the guest's
+process table from a second session and kills the whole tree, then reports
+what it killed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if execScript {
 			if len(args) != 1 || cmd.ArgsLenAtDash() != -1 {
@@ -63,10 +72,6 @@ nothing in it is quoted, escaped or split on the way.
 			return err
 		}
 		e, err := core.NewEngine()
-		if err != nil {
-			return err
-		}
-		port, user, password, key, err := e.SSHTarget(args[0])
 		if err != nil {
 			return err
 		}
@@ -93,8 +98,16 @@ nothing in it is quoted, escaped or split on the way.
 		} else {
 			command = execCommand(want, have, args[1:])
 		}
-		code, err := sshx.ExecScript(context.Background(), execTimeout,
-			port, user, password, key, command, stdin, os.Stdout, os.Stderr)
+		code, err := e.Exec(context.Background(), core.ExecRequest{
+			Env:           args[0],
+			Command:       command,
+			Stdin:         stdin,
+			GuestShell:    have,
+			Timeout:       execTimeout,
+			KillOnTimeout: execKill,
+			Stdout:        os.Stdout,
+			Stderr:        os.Stderr,
+		})
 		if err != nil {
 			return err
 		}
@@ -160,5 +173,7 @@ func init() {
 		"run the command under this shell: powershell, cmd or sh")
 	execCmd.Flags().BoolVar(&execScript, "stdin", false,
 		"read a script from stdin and run it instead of a -- command")
+	execCmd.Flags().BoolVar(&execKill, "kill-on-timeout", false,
+		"kill the command and its children in the guest when the timeout fires")
 	rootCmd.AddCommand(execCmd)
 }

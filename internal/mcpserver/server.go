@@ -173,6 +173,8 @@ func newServer() *mcp.Server {
 			"quoted - a script reaches the shell on stdin, so nothing in it is re-parsed on the way. " +
 			"The environment must be running. Commands run as a user with passwordless sudo, so this can " +
 			"change or destroy anything inside the guest - the host is not affected. " +
+			"A command that outruns timeout_sec is killed in the guest, with its child processes, and the " +
+			"error says what was killed: nothing is left running where you cannot see it. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +
 			"env_screenshot, env_type, env_keys and env_click.",
 	}, envExec)

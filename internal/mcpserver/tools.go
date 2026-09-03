@@ -473,11 +473,14 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	port, user, password, key, err := e.SSHTarget(in.Name)
+	// Needed for every call now, not only the ones that name a shell: the
+	// marker that makes a timed-out command killable is spelled differently
+	// per shell, and it has to survive that shell's parser.
+	guest, err := e.ShellFor(in.Name)
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	command, stdin, err := execRequest(in, func() (string, error) { return e.ShellFor(in.Name) })
+	command, stdin, err := execRequest(in, func() (string, error) { return guest, nil })
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
@@ -488,10 +491,23 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	}
 
 	var out sshx.OutputBuffer
-	code, err := sshx.ExecScript(ctx, timeout, port, user, password, key, command, stdin, &out, &out)
+	code, err := e.Exec(ctx, core.ExecRequest{
+		Env:        in.Name,
+		Command:    command,
+		Stdin:      stdin,
+		GuestShell: guest,
+		Timeout:    timeout,
+		// Always, unlike the CLI's opt-in flag: an agent cannot go and look at
+		// the guest, so a process left running where nobody can see it is
+		// worse than one killed.
+		KillOnTimeout: true,
+		Stdout:        &out,
+		Stderr:        &out,
+	})
 	if err != nil {
+		var killed *core.KilledError
 		var timedOut *sshx.TimeoutError
-		if errors.As(err, &timedOut) {
+		if errors.As(err, &killed) || errors.As(err, &timedOut) {
 			// Whatever it managed to print is the only clue about where it
 			// got stuck, so it goes in the error.
 			return nil, envExecOutput{}, fmt.Errorf("%w; output so far:\n%s", err, tail(out.String()))
