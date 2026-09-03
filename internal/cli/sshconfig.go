@@ -20,27 +20,24 @@ outside the markers is left alone.`,
 		if err != nil {
 			return err
 		}
-		if err := refreshSSHConfig(e.St); err != nil {
+		if err := core.UpdateSSHConfig(e.St); err != nil {
 			return err
 		}
+		warnPasswordAuth(e.St)
 		fmt.Print(core.RenderSSHConfig(e.St))
 		return nil
 	},
 }
 
-// refreshSSHConfig rewrites the managed section and names the goldens whose
-// entries plain ssh and scp will still prompt for. Every command that touches
-// the config goes through here, so the warning cannot be reached by one route
-// and missed by another. It goes to stderr: `ssh-config` prints the config
-// itself on stdout, and that is what people pipe.
-func refreshSSHConfig(st *core.State) error {
-	if err := core.UpdateSSHConfig(st); err != nil {
-		return err
-	}
+// warnPasswordAuth names the goldens whose entries plain ssh and scp will
+// still prompt for. Only ssh-config says it: fork, rm and gc rewrite the file
+// too, but repeating the line on every one of those runs is noise, and the
+// MCP server rewrites it with no terminal to warn on. It goes to stderr
+// because the config itself is what people pipe from stdout.
+func warnPasswordAuth(st *core.State) {
 	for _, g := range core.PasswordAuthGoldens(st) {
 		fmt.Fprintf(os.Stderr, "warning: golden %s has a password and no key, so plain ssh and scp to its envs will prompt; terrarium ssh and terrarium exec will not\n", g)
 	}
-	return nil
 }
 
 func init() { rootCmd.AddCommand(sshConfigCmd) }

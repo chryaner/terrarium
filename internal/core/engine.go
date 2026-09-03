@@ -80,7 +80,15 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell strin
 		return nil, fmt.Errorf("unknown shell %q: one of %s", shell, strings.Join(Shells, ", "))
 	}
 	if image == "" {
+		// A VM already recorded under a golden name is that golden: a second
+		// record for the same VM would let rm --golden on one take the other.
 		image = vmName
+		for name, g := range e.St.Goldens {
+			if g.VMName == vmName {
+				image = name
+				break
+			}
+		}
 	} else if !goldenNameRe.MatchString(image) {
 		return nil, fmt.Errorf("invalid golden name %q (letters, digits, dots, dashes)", image)
 	}
@@ -570,12 +578,12 @@ func (e *Engine) SSHTarget(name string) (port int, user, password, key string, e
 			name, name, goldenPrefix)
 	}
 	g := e.St.Goldens[env.Golden]
-	if g == nil || g.SSHUser == "" {
+	if g == nil || !g.hasCreds() {
 		vmName := ""
 		if g != nil {
 			vmName = g.VMName
 		}
-		return 0, "", "", "", fmt.Errorf("golden %q has no SSH user: work the login out through screenshot/type, then record it with `%s`",
+		return 0, "", "", "", fmt.Errorf("golden %q has no usable credentials: work the login out through screenshot/type, then record it with `%s`",
 			env.Golden, AdoptHint(vmName, env.Golden))
 	}
 	return env.SSHPort, g.SSHUser, g.SSHPassword, g.SSHKey, nil

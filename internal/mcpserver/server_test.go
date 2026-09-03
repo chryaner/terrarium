@@ -143,6 +143,9 @@ func TestToolSchemas(t *testing.T) {
 		{"recipe_list", nil, nil},
 		{"doctor", nil, nil},
 		{"golden_get", []string{"image"}, []string{"cpus", "memory_mb"}},
+		{"env_create", []string{"name", "iso_path", "ostype"}, []string{"disk_gb", "cpus", "memory_mb"}},
+		{"env_push", []string{"name", "local_path", "guest_path"}, []string{"recursive"}},
+		{"env_pull", []string{"name", "guest_path", "local_path"}, []string{"recursive"}},
 		{"golden_import", []string{"ova_path", "name"}, []string{"user", "password", "key"}},
 		// Only the VM is required: adopting without credentials is the first
 		// half of working out an unknown login, not a mistake.

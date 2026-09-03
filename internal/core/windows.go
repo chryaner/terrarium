@@ -46,7 +46,8 @@ func windowsPostInstall(pubKey string) string {
 		`New-Item -Path $d -ItemType Directory -Force; ` +
 		`$a = Join-Path $d administrators_authorized_keys; ` +
 		`Set-Content -Path $a -Value '` + pubKey + `'; ` +
-		`icacls $a /inheritance:r /grant Administrators:F /grant SYSTEM:F"`
+		// SIDs, not names: the builtin groups are localised on non-English Windows.
+		`icacls $a /inheritance:r /grant *S-1-5-32-544:F /grant *S-1-5-18:F"`
 }
 
 // windowsDefaultShell is what sshd hands an exec request to once the
@@ -203,7 +204,9 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, goldens
 		}
 		// The same generator the cloud images use; the post-install installs
 		// the public half where cloud-init would have.
-		pubKey, err := sshx.EnsureKey(keyPath, r.User)
+		// A fixed label: the recipe user is pasted into a batch file by the
+		// post-install, and a quote or ampersand in it would break out.
+		pubKey, err := sshx.EnsureKey(keyPath, "terrarium")
 		if err != nil {
 			return nil, err
 		}

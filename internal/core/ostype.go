@@ -79,11 +79,11 @@ func (e *Engine) FillOSTypes() error {
 // record if it was blank. Goldens win a name collision, the way `info` reads
 // them.
 func (e *Engine) OSTypeOf(name string) (string, error) {
-	if g := e.St.Goldens[name]; g != nil {
-		return e.osType(g.VMName, &g.OSType)
-	}
 	if env := e.St.Envs[name]; env != nil {
 		return e.osType(env.VMName, &env.OSType)
+	}
+	if g := e.St.Goldens[name]; g != nil {
+		return e.osType(g.VMName, &g.OSType)
 	}
 	return "", fmt.Errorf("no golden or env %q", name)
 }

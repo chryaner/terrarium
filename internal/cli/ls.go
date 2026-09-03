@@ -41,7 +41,7 @@ var lsCmd = &cobra.Command{
 		// The guest type is why this column exists, so fill in the records
 		// written before terrarium stored it rather than showing them blank.
 		if err := e.FillOSTypes(); err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "warning: could not record guest types: %v\n", err)
 		}
 
 		role := map[string]lsRow{}

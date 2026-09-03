@@ -38,7 +38,7 @@ already there.`,
 		if err != nil {
 			return err
 		}
-		if err := refreshSSHConfig(e.St); err != nil {
+		if err := core.UpdateSSHConfig(e.St); err != nil {
 			return err
 		}
 

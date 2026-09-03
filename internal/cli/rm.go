@@ -32,7 +32,7 @@ cannot be removed until they are.`,
 		if err := e.Remove(args[0]); err != nil {
 			return err
 		}
-		if err := refreshSSHConfig(e.St); err != nil {
+		if err := core.UpdateSSHConfig(e.St); err != nil {
 			return err
 		}
 		fmt.Printf("removed %s\n", args[0])

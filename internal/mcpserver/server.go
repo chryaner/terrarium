@@ -133,7 +133,7 @@ func newServer() *mcp.Server {
 			"The result has no golden image and therefore no credentials: env_exec will not work on it. " +
 			"Drive the installer with env_screenshot, env_type, env_keys and env_click, and note that " +
 			"env_revert puts the blank disk back and restarts the install. When the OS is up, env_promote " +
-			"turns it into a golden - which the user then gives credentials with `terrarium adopt`. " +
+			"turns it into a golden - and golden_adopt then records the account created inside it. " +
 			"iso_path is a path on this host, where the server runs.",
 	}, envCreate)
 

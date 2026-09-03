@@ -93,7 +93,9 @@ func (e *Engine) Create(name string, o CreateOpts, progress func(string)) (*Env,
 		return nil, e.rollbackFork(name, vmName, err, progress)
 	}
 	if err := e.prepareCreate(env, o, progress); err != nil {
-		return nil, e.rollbackFork(name, vmName, err, progress)
+		rolled := e.rollbackFork(name, vmName, err, progress)
+		e.forgetDisk(vmName)
+		return nil, rolled
 	}
 	return env, nil
 }
@@ -159,4 +161,19 @@ func (e *Engine) prepareCreate(env *Env, o CreateOpts, progress func(string)) er
 	time.Sleep(settleTime)
 	progress("snapshotting clean state (blank disk: revert restarts the install)")
 	return e.VB.TakeSnapshot(vmName, cleanSnapshot)
+}
+
+// forgetDisk removes the blank disk a failed create may have left behind.
+// unregistervm --delete-all only takes media that were attached to the VM; a
+// disk created but not yet attached stays registered and on disk, and the
+// next create of the same name then fails at createmedium because of it.
+func (e *Engine) forgetDisk(vmName string) {
+	folder, err := e.VB.MachineFolder()
+	if err != nil {
+		return
+	}
+	disk := filepath.Join(folder, vmName, vmName+".vdi")
+	_ = e.VB.CloseMedium(disk)
+	_ = os.Remove(disk)
+	_ = os.Remove(filepath.Dir(disk))
 }

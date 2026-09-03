@@ -40,17 +40,14 @@ type Info struct {
 	Expires time.Time `json:"expires,omitempty"`
 }
 
-// Info gathers what is known about a golden or an env. Goldens win a name
-// collision: a golden is the thing an env is forked from, so it is the more
-// likely subject of the question.
+// Info gathers what is known about a golden or an env. Envs win a name
+// collision, the same way screenshot resolves one: an env is what people work
+// in day to day, and one name has to mean one machine everywhere.
 func (e *Engine) Info(name string) (Info, error) {
 	var in Info
 	var g *Golden
 	image := name
 	switch {
-	case e.St.Goldens[name] != nil:
-		g = e.St.Goldens[name]
-		in = Info{Kind: "golden", VMName: g.VMName, UUID: g.UUID, Snapshot: g.Snapshot}
 	case e.St.Envs[name] != nil:
 		env := e.St.Envs[name]
 		g = e.St.Goldens[env.Golden]
@@ -59,6 +56,9 @@ func (e *Engine) Info(name string) (Info, error) {
 			Kind: "env", VMName: env.VMName, UUID: env.UUID, Snapshot: cleanSnapshot,
 			Golden: env.Golden, SSHPort: env.SSHPort, Expires: env.Expires,
 		}
+	case e.St.Goldens[name] != nil:
+		g = e.St.Goldens[name]
+		in = Info{Kind: "golden", VMName: g.VMName, UUID: g.UUID, Snapshot: g.Snapshot}
 	default:
 		return Info{}, fmt.Errorf("no golden or env %q: `terrarium ls` lists both", name)
 	}
