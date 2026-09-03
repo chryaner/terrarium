@@ -26,6 +26,9 @@ type ExecRequest struct {
 	// KillOnTimeout tags the command and, if the deadline passes, opens a
 	// second session to kill everything the tag names.
 	KillOnTimeout bool
+	// Desktop runs the command in the session a user is logged into rather
+	// than the service session sshd hands it. Windows guests only.
+	Desktop        bool
 	Stdout, Stderr io.Writer
 }
 
@@ -43,6 +46,9 @@ func (e *Engine) Run(ctx context.Context, envName string, timeout time.Duration,
 // Exec runs a request: marker injection, the run itself, and the kill that a
 // timeout triggers when the caller asked for one.
 func (e *Engine) Exec(ctx context.Context, r ExecRequest) (int, error) {
+	if r.Desktop {
+		return e.execDesktop(ctx, r)
+	}
 	command := r.Command
 	id := ""
 	if r.KillOnTimeout {

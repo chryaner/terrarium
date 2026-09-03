@@ -461,6 +461,7 @@ type envExecInput struct {
 	Script     string `json:"script,omitempty" jsonschema:"multi-line script to run instead of command; it reaches the shell on stdin so nothing in it is quoted or split"`
 	Shell      string `json:"shell,omitempty" jsonschema:"run under this shell instead of the guest's own: powershell, cmd or sh"`
 	TimeoutSec int    `json:"timeout_sec,omitempty" jsonschema:"seconds to wait before giving up (default 300)"`
+	Desktop    bool   `json:"desktop,omitempty" jsonschema:"Windows guests only: run in the session a user is logged into, so env_screenshot shows the window or dialog the command opens. Without it a command runs in session 0, which has no screen"`
 }
 
 type envExecOutput struct {
@@ -501,6 +502,7 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 		// the guest, so a process left running where nobody can see it is
 		// worse than one killed.
 		KillOnTimeout: true,
+		Desktop:       in.Desktop,
 		Stdout:        &out,
 		Stderr:        &out,
 	})

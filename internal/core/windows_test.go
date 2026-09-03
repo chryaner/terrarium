@@ -52,7 +52,7 @@ const testPubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJq4/0d0h7Zc0VLC9WcpqZ+N
 // VirtualBox pastes the post-install into a .cmd, so a single metacharacter
 // costs a forty-minute install to discover.
 func TestWindowsPostInstallIsBatchSafe(t *testing.T) {
-	cmd := windowsPostInstall(testPubKey)
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
 	for _, c := range []string{"%", "&", "|", "<", ">", "^", "\r", "\n"} {
 		if strings.Contains(cmd, c) {
 			t.Errorf("windowsPostInstall contains cmd metacharacter %q", c)
@@ -72,7 +72,7 @@ func TestWindowsPostInstallIsBatchSafe(t *testing.T) {
 // The two things that make a new golden usable the way the Linux ones are:
 // key auth, and a shell that needs one layer of quoting instead of three.
 func TestWindowsPostInstallInstallsKeyAndShell(t *testing.T) {
-	cmd := windowsPostInstall(testPubKey)
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
 	for _, want := range []string{
 		testPubKey,
 		// sshd reads this file, and only this file, for administrators.
@@ -93,5 +93,27 @@ func TestWindowsPostInstallInstallsKeyAndShell(t *testing.T) {
 	if strings.Index(cmd, "Add-WindowsCapability") > strings.Index(cmd, "Set-Content") ||
 		strings.Index(cmd, "Set-Content") > strings.Index(cmd, "icacls") {
 		t.Errorf("post-install steps are out of order:\n%s", cmd)
+	}
+}
+
+// A fork nobody has logged into has no interactive session, so exec --desktop
+// and screenshot have nothing to show. Winlogon logging the account in by
+// itself is what gives every fork one.
+func TestWindowsPostInstallSetsAutoLogon(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
+	for _, want := range []string{
+		winlogonKey,
+		"AutoAdminLogon",
+		"DefaultUserName -Value 'terrarium'",
+		"DefaultPassword -Value 'pw'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("post-install is missing %q: %s", want, cmd)
+		}
+	}
+	// A quote in the password would end the PowerShell string it is pasted
+	// into and leave the rest of the command as syntax.
+	if got := windowsPostInstall(testPubKey, "u", "it's"); !strings.Contains(got, "DefaultPassword -Value 'it''s'") {
+		t.Errorf("a quote in the password is not escaped: %s", got)
 	}
 }

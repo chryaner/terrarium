@@ -175,6 +175,9 @@ func newServer() *mcp.Server {
 			"change or destroy anything inside the guest - the host is not affected. " +
 			"A command that outruns timeout_sec is killed in the guest, with its child processes, and the " +
 			"error says what was killed: nothing is left running where you cannot see it. " +
+			"On a Windows guest an ordinary command runs in session 0, which has no screen: if it opens a " +
+			"window or a dialog it waits there forever and env_screenshot shows nothing. Set desktop to run " +
+			"it in the session a user is logged into instead, where env_screenshot can see what it wants. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +
 			"env_screenshot, env_type, env_keys and env_click.",
 	}, envExec)

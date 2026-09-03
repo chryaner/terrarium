@@ -19,6 +19,7 @@ var (
 	execShell   string
 	execScript  bool
 	execKill    bool
+	execDesk    bool
 )
 
 var execCmd = &cobra.Command{
@@ -42,6 +43,7 @@ there its words go over as typed.
   --shell {powershell,cmd,sh}  run under this shell instead
   --stdin                      read a whole script from stdin and run that
   --kill-on-timeout            kill the command in the guest when it times out
+  --desktop                    run it in the logged-in session (Windows guests)
 
 --stdin takes no -- command: the script crosses as the shell's own stdin, so
 nothing in it is quoted, escaped or split on the way.
@@ -53,7 +55,14 @@ from here, so the command keeps running in the guest, invisibly. On Windows it
 runs in session 0, where anything that opens a dialog waits for a click nobody
 can make. --kill-on-timeout tags the command, finds the tag in the guest's
 process table from a second session and kills the whole tree, then reports
-what it killed.`,
+what it killed.
+
+--desktop is the other half of that. A Windows guest runs an SSH command in
+session 0, which has no desktop, so a GUI program or a dialog waits there
+unseen. --desktop runs the command as an interactive scheduled task in the
+session someone is logged into, so terrarium screenshot shows what it is
+waiting on. It needs a user logged on at the console, and says so if there is
+none.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if execScript {
 			if len(args) != 1 || cmd.ArgsLenAtDash() != -1 {
@@ -96,7 +105,13 @@ what it killed.`,
 			}
 			stdin, command = bytes.NewReader(script), core.ScriptCommand(want)
 		} else {
-			command = execCommand(want, have, args[1:])
+			// A --desktop command is a task action, which cmd.exe runs: the
+			// guest's own session shell never sees it.
+			carrier := have
+			if execDesk {
+				carrier = core.ShellCmd
+			}
+			command = execCommand(want, carrier, args[1:])
 		}
 		code, err := e.Exec(context.Background(), core.ExecRequest{
 			Env:           args[0],
@@ -105,6 +120,7 @@ what it killed.`,
 			GuestShell:    have,
 			Timeout:       execTimeout,
 			KillOnTimeout: execKill,
+			Desktop:       execDesk,
 			Stdout:        os.Stdout,
 			Stderr:        os.Stderr,
 		})
@@ -175,5 +191,7 @@ func init() {
 		"read a script from stdin and run it instead of a -- command")
 	execCmd.Flags().BoolVar(&execKill, "kill-on-timeout", false,
 		"kill the command and its children in the guest when the timeout fires")
+	execCmd.Flags().BoolVar(&execDesk, "desktop", false,
+		"run in the logged-in interactive session so the screen shows it (Windows guests)")
 	rootCmd.AddCommand(execCmd)
 }
