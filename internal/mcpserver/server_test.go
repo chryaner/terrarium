@@ -132,7 +132,9 @@ func TestToolSchemas(t *testing.T) {
 		{"golden_get", []string{"image"}, []string{"cpus", "memory_mb"}},
 		{"env_fork", []string{"golden", "name"}, []string{"cpus", "memory_mb", "share_host_path", "ttl_seconds"}},
 		{"env_start", []string{"name"}, nil},
-		{"env_exec", []string{"name", "command"}, []string{"timeout_sec"}},
+		// command is optional because script is the alternative to it;
+		// execRequest is what enforces exactly one of the two.
+		{"env_exec", []string{"name"}, []string{"command", "script", "shell", "timeout_sec"}},
 		{"env_down", []string{"name"}, nil},
 		{"env_revert", []string{"name"}, nil},
 		{"env_rm", []string{"name"}, nil},
