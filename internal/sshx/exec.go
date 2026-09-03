@@ -46,17 +46,13 @@ func (e *TimeoutError) Error() string {
 		e.Timeout, e.Command)
 }
 
-// ExecTimeout is ExecStreams with a ceiling on how long to wait. Whatever the
-// command printed before the deadline has already been written to stdout and
-// stderr, which is the only thing left to go on when it hangs.
-func ExecTimeout(ctx context.Context, timeout time.Duration, port int, user, password, keyPath, command string, stdout, stderr io.Writer) (int, error) {
-	return ExecScript(ctx, timeout, port, user, password, keyPath, command, nil, stdout, stderr)
-}
-
-// ExecScript is ExecTimeout with a script fed to the command's own stdin, for
-// the shells that read one there: `sh -s`, `powershell -Command -`. That is
-// the one way to hand a guest a multi-line script without it passing through
-// anybody's quoting on the way.
+// ExecScript is ExecStreams with a ceiling on how long to wait and an optional
+// script fed to the command's own stdin, for the shells that read one there:
+// `sh -s`, `powershell -Command -`. That is the one way to hand a guest a
+// multi-line script without it passing through anybody's quoting on the way.
+//
+// Whatever the command printed before the deadline has already been written to
+// stdout and stderr, which is the only thing left to go on when it hangs.
 func ExecScript(ctx context.Context, timeout time.Duration, port int, user, password, keyPath, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

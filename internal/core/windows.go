@@ -162,11 +162,11 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, gol
 	// The disc knows what it installs; the recipe only thinks it does. Wrong
 	// here means a 32-bit VM created for a 64-bit installer, which fails long
 	// after this point and says nothing about why.
-	detected, err := e.VB.DetectISO(isoPath)
+	detected, err := e.VB.DetectISOType(isoPath)
 	if err != nil {
 		progress("could not read the ISO's guest type: " + err.Error())
 	}
-	ostype, err := resolveISOOSType(image, r.OSType, detected.TypeID, progress)
+	ostype, err := resolveISOOSType(image, r.OSType, detected, progress)
 	if err != nil {
 		return nil, err
 	}

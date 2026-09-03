@@ -7,8 +7,8 @@ import (
 
 // The winxp fixture is real output, captured from VirtualBox 7.2: the command
 // exits non-zero with E_NOTIMPL and prints a usable detection anyway, which is
-// exactly the case DetectISO must not throw away.
-func TestParseDetectISO(t *testing.T) {
+// exactly the case DetectISOType must not throw away.
+func TestParseDetectISOType(t *testing.T) {
 	winxp, err := os.ReadFile("testdata/detect-winxp.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -17,12 +17,12 @@ func TestParseDetectISO(t *testing.T) {
 	cases := []struct {
 		name string
 		out  string
-		want ISOInfo
+		want string
 	}{
 		{
 			name: "captured winxp",
 			out:  string(winxp),
-			want: ISOInfo{TypeID: "WindowsXP", Version: "sp3", Languages: "en-US", Unattended: true},
+			want: "WindowsXP",
 		},
 		{
 			name: "64-bit windows",
@@ -33,37 +33,27 @@ func TestParseDetectISO(t *testing.T) {
 				"    OS Languages = en-US\r\n" +
 				"    OS Hints     = \r\n" +
 				"    Unattended installation supported = yes\r\n",
-			want: ISOInfo{
-				TypeID: "Windows10_64", Version: "10.0.19041", Flavor: "Professional",
-				Languages: "en-US", Unattended: true,
-			},
+			want: "Windows10_64",
 		},
 		{
-			// A disc VirtualBox recognises but cannot install unattended.
-			name: "unattended not supported",
-			out: "    OS TypeId    = Debian_64\n" +
-				"    Unattended installation supported = no\n",
-			want: ISOInfo{TypeID: "Debian_64"},
-		},
-		{
-			// Image lines carry no `=` and must not be read as fields.
+			// Image lines have a different shape and must not be read as one.
 			name: "image lines ignored",
 			out: "    OS TypeId    = Windows11_64\n" +
 				"    Detected images (2):\n" +
 				"    #1: \"Windows 11 Home\"\n" +
 				"    #6: \"Windows 11 Pro\"\n",
-			want: ISOInfo{TypeID: "Windows11_64"},
+			want: "Windows11_64",
 		},
 		{
 			name: "nothing detected",
 			out:  "VBoxManage.exe: error: Cannot open the ISO\n",
-			want: ISOInfo{},
+			want: "",
 		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := parseDetectISO(c.out); got != c.want {
-				t.Errorf("parseDetectISO:\n got %+v\nwant %+v", got, c.want)
+			if got := parseDetectISOType(c.out); got != c.want {
+				t.Errorf("parseDetectISOType: got %q, want %q", got, c.want)
 			}
 		})
 	}

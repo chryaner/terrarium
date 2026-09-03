@@ -5,61 +5,35 @@ import (
 	"strings"
 )
 
-// ISOInfo is what `VBoxManage unattended detect` worked out about an
-// installation ISO. TypeID is the guest type id createvm takes
-// (Windows10_64), the one field terrarium acts on; the rest is reported so a
-// human can see what the disc actually is.
-type ISOInfo struct {
-	TypeID    string
-	Version   string
-	Flavor    string
-	Languages string
-	Hints     string
-	// Unattended is whether VirtualBox can drive this installer with nobody
-	// at the keyboard.
-	Unattended bool
-}
-
-// DetectISO asks VirtualBox what an installation ISO installs, so a recipe
-// does not have to guess the guest architecture and be silently wrong.
+// DetectISOType asks VirtualBox what an installation ISO installs and returns
+// the guest type id createvm takes (Windows10_64), so a recipe does not have
+// to guess the guest architecture and be silently wrong. Empty when VirtualBox
+// does not recognise the disc.
 //
 // The exit status is deliberately not fatal: VirtualBox returns E_NOTIMPL for
 // a disc it recognises but cannot fully drive - Windows XP, for instance -
 // and still prints everything it worked out. The call has only really failed
 // when nothing parses out of it.
-func (c *Client) DetectISO(iso string) (ISOInfo, error) {
+func (c *Client) DetectISOType(iso string) (string, error) {
 	out, err := c.runRaw(slowTimeout, "unattended", "detect", "--iso="+iso)
-	info := parseDetectISO(out)
-	if info.TypeID == "" && err != nil {
-		return ISOInfo{}, err
+	typeID := parseDetectISOType(out)
+	if typeID == "" && err != nil {
+		return "", err
 	}
-	return info, nil
+	return typeID, nil
 }
 
-// detectLineRe matches the indented `    OS TypeId    = Windows10_64` lines.
+// detectTypeRe matches the indented `    OS TypeId    = Windows10_64` line.
 // Anything else VBoxManage prints - the header, the per-image lines of a
-// multi-edition Windows ISO - has no `=` and falls through.
-var detectLineRe = regexp.MustCompile(`(?m)^[ \t]+([A-Za-z][^=]*?)[ \t]*=[ \t]*(.*?)[ \t\r]*$`)
+// multi-edition Windows ISO - does not have that shape and falls through.
+var detectTypeRe = regexp.MustCompile(`(?m)^[ \t]+OS TypeId[ \t]*=[ \t]*(.*?)[ \t\r]*$`)
 
-func parseDetectISO(out string) ISOInfo {
-	var info ISOInfo
-	for _, m := range detectLineRe.FindAllStringSubmatch(out, -1) {
-		switch m[1] {
-		case "OS TypeId":
-			info.TypeID = m[2]
-		case "OS Version":
-			info.Version = m[2]
-		case "OS Flavor":
-			info.Flavor = m[2]
-		case "OS Languages":
-			info.Languages = m[2]
-		case "OS Hints":
-			info.Hints = m[2]
-		case "Unattended installation supported":
-			info.Unattended = m[2] == "yes"
-		}
+func parseDetectISOType(out string) string {
+	m := detectTypeRe.FindStringSubmatch(out)
+	if m == nil {
+		return ""
 	}
-	return info
+	return m[1]
 }
 
 // OSTypeID is a VM's guest type as the id createvm and recipes use
