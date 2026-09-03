@@ -68,6 +68,30 @@ func (e *Engine) GuestIsWindows(envName string) (bool, error) {
 	return isWindowsGuest(ostype), nil
 }
 
+// resolveISOOSType decides which guest type an ISO build creates its VM with.
+// The recipe is a guess written once; the ISO in front of us is the fact, and
+// the field report that prompted this was a recipe pinned to a 32-bit Windows
+// silently used for an x64 disc. So the detected type wins any disagreement
+// about architecture, and the recipe still wins where they agree - it may name
+// a more specific edition than detection can.
+func resolveISOOSType(image, fromRecipe, detected string, progress func(string)) (string, error) {
+	switch {
+	case fromRecipe == "" && detected == "":
+		return "", fmt.Errorf("recipe %s: VirtualBox cannot tell what this ISO installs.\nadd the guest type to the recipe, e.g. `ostype: Windows10_64` (`VBoxManage list ostypes` lists them); copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ to override a shipped one", image)
+	case fromRecipe == "":
+		progress("the ISO installs " + detected + " (" + archOf(detected) + ")")
+		return detected, nil
+	case detected == "":
+		return fromRecipe, nil
+	case archOf(fromRecipe) != archOf(detected):
+		progress(fmt.Sprintf("recipe says %s (%s) but the ISO is %s: using %s",
+			fromRecipe, archOf(fromRecipe), archOf(detected), detected))
+		return detected, nil
+	default:
+		return fromRecipe, nil
+	}
+}
+
 // buildWindowsGolden installs Windows from an ISO. Unlike the cloud image
 // paths there is nothing to import: VirtualBox drives Windows setup through
 // its own generated answer file, which takes tens of minutes. That cost is
@@ -78,6 +102,18 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath stri
 	if !validSSHUser(r.User) {
 		return nil, fmt.Errorf("recipe %s: ssh user contains an illegal character", image)
 	}
+	// The disc knows what it installs; the recipe only thinks it does. Wrong
+	// here means a 32-bit VM created for a 64-bit installer, which fails long
+	// after this point and says nothing about why.
+	detected, err := e.VB.DetectISO(isoPath)
+	if err != nil {
+		progress("could not read the ISO's guest type: " + err.Error())
+	}
+	ostype, err := resolveISOOSType(image, r.OSType, detected.TypeID, progress)
+	if err != nil {
+		return nil, err
+	}
+	r.OSType = ostype
 	// Same reasoning, both cost tens of minutes to discover at install time:
 	// XP-era setup halts at the key screen without a key, and it has no SSH
 	// server for the default post-install to reach, so the readiness wait
