@@ -211,6 +211,8 @@ $ terrarium revert t1              # back to clean in seconds
 $ terrarium rm t1
 ```
 
+`terrarium ls` lists the machines with their guest type, and `terrarium info
+<name>` reports one in full - architecture, hardware, snapshot, credentials.
 `down` and `start` park and wake an env without losing it. `fork --ttl 2h`
 marks an env to expire, and `terrarium gc` removes the expired ones (and any
 whose VM you deleted by hand).
@@ -296,6 +298,31 @@ setup:
 state you made by hand rather than by script, `terrarium promote <env> <name>`
 flattens a configured env into a golden directly. `terrarium rm --golden
 <name>` removes an image you are done with.
+
+### Machines you already have
+
+`terrarium adopt <vm>` records a VirtualBox VM you built yourself as a golden,
+without modifying it. `terrarium import <file.ova> --name <golden>` does the
+same for an appliance file: it imports and snapshots it, and seeds nothing, so
+an export that predates cloud-init imports instead of hanging.
+
+Neither needs credentials. When you do not know the login yet, adopt or import
+without one, fork it, and drive the fork through the console:
+
+```console
+$ terrarium import centos6.ova --name centos6
+$ terrarium fork centos6 probe
+$ terrarium screenshot probe          # read the login prompt
+$ terrarium type probe root --enter   # try one
+$ terrarium screenshot probe          # did it take?
+$ terrarium adopt trr-golden-centos6 --name centos6 --user root --password <pw>
+```
+
+Re-running `adopt` updates the record, so the last line is how a credentialless
+golden becomes one `exec` and `ssh` work against. `terrarium info <name>`
+reports what a golden or env actually is - guest type, architecture, hardware,
+snapshot and which credentials are recorded - and `screenshot` works on any
+running machine, including a golden or a VM terrarium does not manage.
 
 ## What it is not
 
