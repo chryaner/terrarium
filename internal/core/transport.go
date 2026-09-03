@@ -159,7 +159,11 @@ func (e *Engine) runGuestScript(ctx context.Context, vmName string, creds vbox.G
 		local.Close()
 		return -1, err
 	}
-	local.Close()
+	// Checked: a close that fails means the script on disk is not the script
+	// that was asked for, and copying it into the guest would run the wrong one.
+	if err := local.Close(); err != nil {
+		return -1, err
+	}
 
 	guestPath := path.Join(dir, "trr-"+newMarkerID()+ext)
 	if err := e.VB.GuestCopyTo(vmName, creds, local.Name(), guestPath, false); err != nil {

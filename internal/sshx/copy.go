@@ -144,6 +144,8 @@ func pullFile(c *sftp.Client, remote, local string, fi os.FileInfo) error {
 	if err := dst.Close(); err != nil {
 		return err
 	}
+	// Best effort, as in pushFile: the mode a Windows guest reports is not one
+	// worth failing a finished transfer over.
 	os.Chmod(local, fi.Mode().Perm())
 	return nil
 }

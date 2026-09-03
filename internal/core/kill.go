@@ -143,6 +143,10 @@ func (e *KilledError) Error() string {
 // command is what the caller asked to run, not the marked line it was sent as:
 // the marker is bookkeeping, and showing it only makes the reader wonder what
 // they typed wrong.
+//
+// The kill gets its own context rather than the caller's. The caller's is
+// often already done - a cancelled exec is one of the reasons to be here - and
+// a kill that skips itself for that leaves exactly the process it was for.
 func (e *Engine) killMarked(envName, shell, id string, timeout time.Duration, command string) error {
 	script, scriptShell := killScript(shell, id)
 	var out sshx.OutputBuffer
