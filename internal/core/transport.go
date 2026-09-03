@@ -27,6 +27,10 @@ const (
 // Transports lists the values in the order help text should show them.
 var Transports = []string{TransportSSH, TransportGuestControl}
 
+// guestCleanupTimeout bounds tidying a scratch file out of the guest. Short,
+// because it runs after the command the caller was waiting for.
+const guestCleanupTimeout = 30 * time.Second
+
 // validTransport reports whether s names a transport terrarium can use.
 func validTransport(s string) bool {
 	return s == TransportSSH || s == TransportGuestControl
@@ -174,6 +178,11 @@ func guestNativePath(shell, p string) string {
 	return strings.ReplaceAll(p, "/", `\`)
 }
 
+// removeGuestFile deletes one scratch file from the guest. Best effort and
+// unreported: the script it belonged to has already run, and a leftover file
+// in C:\Windows\Temp is not worth failing that run over. cmd.exe does the
+// deleting on Windows whatever shell the commands use, because `del` is a
+// builtin of that shell and of no other.
 func (e *Engine) removeGuestFile(vmName string, creds vbox.GuestCreds, shell, guestPath string) {
 	exe, args := guestShellExe(shell)
 	rm := "rm -f " + guestPath
@@ -181,7 +190,7 @@ func (e *Engine) removeGuestFile(vmName string, creds vbox.GuestCreds, shell, gu
 		rm = "del /q " + guestNativePath(ShellCmd, guestPath)
 		exe, args = guestShellExe(ShellCmd)
 	}
-	e.VB.GuestRun(context.Background(), vmName, creds, 30*time.Second, exe, append(args, rm), nil, io.Discard, io.Discard)
+	e.VB.GuestRun(context.Background(), vmName, creds, guestCleanupTimeout, exe, append(args, rm), nil, io.Discard, io.Discard)
 }
 
 // copyGuestControl is Push/Pull over Guest Additions. parents is honoured on

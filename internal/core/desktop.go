@@ -92,13 +92,18 @@ func parseTaskQuery(out string) (done bool, code int, read bool) {
 	return true, n, true
 }
 
+// unreadableOutput is how much of the guest's answer an error quotes: enough
+// of the tail to recognise a language or a changed format, not enough to bury
+// the message it is attached to.
+const unreadableOutput = 800
+
 // unreadableErr reports guest output terrarium cannot make sense of, with
 // enough of it to see why. Everything --desktop reads is an English Windows
 // command's output; on any other one this is the honest answer.
 func unreadableErr(what, out string) error {
 	out = strings.TrimSpace(out)
-	if len(out) > 800 {
-		out = out[len(out)-800:]
+	if len(out) > unreadableOutput {
+		out = out[len(out)-unreadableOutput:]
 	}
 	return fmt.Errorf("could not read the guest's %s output - a non-English Windows reports these fields in its own language, and --desktop cannot drive it:\n%s", what, out)
 }

@@ -81,13 +81,22 @@ func (e *GuestTimeout) Error() string {
 	return fmt.Sprintf("guest command did not finish within %s and is still running in the guest", e.Timeout)
 }
 
-// timedOutMarker is what VBoxManage prints when its own --timeout fires. It
-// exits 1 either way, so the message is the only thing that tells a deadline
-// apart from a session that would not start.
-const timedOutMarker = "VERR_TIMEOUT"
+const (
+	// timedOutMarker is what VBoxManage prints when its own --timeout fires.
+	// It exits 1 either way, so the message is the only thing that tells a
+	// deadline apart from a session that would not start.
+	timedOutMarker = "VERR_TIMEOUT"
+	// tailBytes is how much of a stream tailWriter keeps. Enough for the last
+	// few VBoxManage messages, which is all anything reads it for.
+	tailBytes = 4096
+	// guestKillGrace is how long VirtualBox's own timeout runs past the host's,
+	// so a caller that wants to kill the tree gets there first and one that
+	// does not still has the process ended for it.
+	guestKillGrace = 60 * time.Second
+)
 
-// tailWriter passes everything through and keeps the last few KB, so a stream
-// going to the caller can still be looked at for one known message.
+// tailWriter passes everything through and keeps the last tailBytes, so a
+// stream going to the caller can still be looked at for one known message.
 type tailWriter struct {
 	w   io.Writer
 	buf []byte
@@ -95,8 +104,8 @@ type tailWriter struct {
 
 func (t *tailWriter) Write(p []byte) (int, error) {
 	t.buf = append(t.buf, p...)
-	if len(t.buf) > 4096 {
-		t.buf = t.buf[len(t.buf)-4096:]
+	if len(t.buf) > tailBytes {
+		t.buf = t.buf[len(t.buf)-tailBytes:]
 	}
 	if t.w == nil {
 		return len(p), nil
@@ -138,11 +147,6 @@ func (c *Client) GuestRun(ctx context.Context, vm string, creds GuestCreds, time
 	// The password is on the command line, so the argv never goes in an error.
 	return -1, fmt.Errorf("VBoxManage guestcontrol run on %s: %w", vm, err)
 }
-
-// guestKillGrace is how long VirtualBox's own timeout runs past the host's,
-// so a caller that wants to kill the tree gets there first and one that does
-// not still has the process ended for it.
-const guestKillGrace = 60 * time.Second
 
 // GuestMkdirAll creates a directory in the guest, parents included. copyto
 // will not do it: it fails with "path to guest file not found" rather than
@@ -192,6 +196,11 @@ func guestWindowsPath(p string) string {
 	return p
 }
 
+// redactedLines is how much of a failed call's output an error quotes. The
+// first few lines carry what went wrong; the rest is VBoxManage's context
+// trace.
+const redactedLines = 4
+
 // redactedTail is what a failed guestcontrol call may be quoted as. VBoxManage
 // echoes nothing of its own arguments in these messages, but the credentials
 // are on that command line, so only the message VirtualBox produced is kept
@@ -201,8 +210,8 @@ func redactedTail(out string) string {
 	for i, l := range lines {
 		lines[i] = strings.TrimSpace(l)
 	}
-	if len(lines) > 4 {
-		lines = lines[:4]
+	if len(lines) > redactedLines {
+		lines = lines[:redactedLines]
 	}
 	return strings.Join(lines, "; ")
 }
@@ -223,6 +232,15 @@ func (c *Client) GuestAdditionsVersion(vm string) (string, error) {
 	return strings.TrimSpace(v), nil
 }
 
+const (
+	// readyProbeTimeout bounds one trial command. A guest still starting
+	// services refuses fast; one that hangs is not ready either.
+	readyProbeTimeout = 30 * time.Second
+	// readyPollInterval is the gap between attempts, against a boot measured
+	// in tens of seconds.
+	readyPollInterval = 2 * time.Second
+)
+
 // GuestReady blocks until the guest can actually run a command: the additions
 // have reported a version and a trial command comes back. The version alone is
 // not enough - it appears while the guest is still starting services, and the
@@ -237,14 +255,14 @@ func (c *Client) GuestReady(ctx context.Context, vm string, creds GuestCreds, ex
 				progress("guest additions " + v + ", waiting for them to take a command")
 				said = true
 			}
-			if _, err := c.GuestRun(ctx, vm, creds, 30*time.Second, exe, argv, nil, io.Discard, io.Discard); err == nil {
+			if _, err := c.GuestRun(ctx, vm, creds, readyProbeTimeout, exe, argv, nil, io.Discard, io.Discard); err == nil {
 				return nil
 			}
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(2 * time.Second):
+		case <-time.After(readyPollInterval):
 		}
 	}
 	return fmt.Errorf("guest additions on %s did not answer a command within %s: are they installed and is the user %q able to log in?",
