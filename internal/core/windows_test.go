@@ -117,3 +117,36 @@ func TestWindowsPostInstallSetsAutoLogon(t *testing.T) {
 		t.Errorf("a quote in the password is not escaped: %s", got)
 	}
 }
+
+// The post-install is pasted into a .cmd, so a password with cmd syntax in it
+// breaks the whole provisioning step - forty minutes into an install, with
+// nothing in the error to say why.
+func TestBadPostInstallChar(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   string
+		bad  bool
+	}{
+		{"an ordinary password", "hunter2", false},
+		{"punctuation cmd does not read", "a-b_c.d!", false},
+		{"a quote would close the -Command string", `a"b`, true},
+		{"percent is a variable in a batch file", "a%b", true},
+		{"ampersand starts another command", "a&b", true},
+		{"a pipe redirects the whole line", "a|b", true},
+		{"angle brackets redirect", "a>b", true},
+		{"a caret escapes the next character", "a^b", true},
+		{"a line break ends the command", "a\r\nb", true},
+	} {
+		if got := badPostInstallChar(c.in) != ""; got != c.bad {
+			t.Errorf("%s: %q rejected=%v, want %v", c.name, c.in, got, c.bad)
+		}
+	}
+	// A password that passes has to survive into a post-install that is still
+	// batch-safe, which is what the check exists to guarantee.
+	cmd := windowsPostInstall(testPubKey, "terrarium", "a-b_c.d!")
+	for _, ch := range []string{"%", "&", "|", "<", ">", "^"} {
+		if strings.Contains(cmd, ch) {
+			t.Errorf("an accepted password still produced %q in the post-install", ch)
+		}
+	}
+}

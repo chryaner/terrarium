@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +66,24 @@ func windowsPostInstall(pubKey, user, password string) string {
 // composed: VirtualBox pastes this command into a batch file, where a %
 // would be eaten before PowerShell saw it.
 const winlogonKey = `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`
+
+// postInstallBadChars are the characters cmd.exe reads as syntax in the batch
+// file VirtualBox pastes the post-install command into, plus the quote that
+// would close its one -Command string. A value carrying any of them silently
+// breaks the whole provisioning step.
+const postInstallBadChars = `%&|<>^"`
+
+// badPostInstallChar names the first character that cannot go in the
+// post-install, or "" if the value is safe.
+func badPostInstallChar(s string) string {
+	if i := strings.IndexAny(s, postInstallBadChars); i >= 0 {
+		return strconv.Quote(string(s[i]))
+	}
+	if strings.ContainsAny(s, "\r\n") {
+		return "a line break"
+	}
+	return ""
+}
 
 // psLiteral escapes a value for the single-quoted PowerShell string it is
 // pasted into. A quote is the only thing single quotes cannot carry, and it is
@@ -131,6 +150,14 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, gol
 	// name should not cost forty minutes to find out about.
 	if !validSSHUser(r.User) {
 		return nil, fmt.Errorf("recipe %s: ssh user contains an illegal character", image)
+	}
+	// Same reason, same cost: the password is pasted into the post-install
+	// batch file, where any of these would end the command PowerShell was
+	// meant to run - and the install is forty minutes gone before anyone
+	// finds out.
+	if c := badPostInstallChar(r.Password); c != "" {
+		return nil, fmt.Errorf("recipe %s: the password contains %s, which the guest's post-install script cannot carry.\nit is pasted into a batch file, so none of %s may appear in it - copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ and use a password without them",
+			image, c, postInstallBadChars)
 	}
 	// The disc knows what it installs; the recipe only thinks it does. Wrong
 	// here means a 32-bit VM created for a 64-bit installer, which fails long
