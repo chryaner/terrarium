@@ -56,3 +56,40 @@ func TestQuotePOSIXQuotesBackslashes(t *testing.T) {
 		t.Errorf("got %s, want %s", got, want)
 	}
 }
+
+// The other half of the field report: PowerShell one-liners needed three
+// layers of escaping because everything was joined for cmd.exe. What the
+// guest's PowerShell must see for it to rebuild the argv the user typed.
+func TestQuotePowerShell(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"ordinary words are left alone", []string{"Get-Date", "-Format", "o"}, "Get-Date -Format o"},
+		{"a Windows path needs no quoting", []string{"Get-Item", `C:\Windows\System32`}, `Get-Item C:\Windows\System32`},
+		{"a space must not split the argument", []string{"Get-Item", `C:\Program Files`}, `Get-Item 'C:\Program Files'`},
+		// The whole point: PowerShell expands $x and $(...) in every other
+		// quoting there is.
+		{"the guest must not expand variables", []string{"Write-Output", "$env:PATH"}, `Write-Output '$env:PATH'`},
+		{"a subexpression must not run in the guest", []string{"Write-Output", "$(whoami)"}, `Write-Output '$(whoami)'`},
+		{"a backtick must not escape anything", []string{"Write-Output", "a`nb"}, "Write-Output 'a`nb'"},
+		{"a double quote survives as data", []string{"Write-Output", `say "hi"`}, `Write-Output 'say "hi"'`},
+		// Single quotes cannot be escaped in PowerShell, only doubled.
+		{"embedded single quote", []string{"Write-Output", "it's"}, `Write-Output 'it''s'`},
+		{"only a quote", []string{"Write-Output", "'"}, `Write-Output ''''`},
+		{"an empty argument survives as an argument", []string{"Test-Path", ""}, "Test-Path ''"},
+		{"unicode is data, not syntax", []string{"Write-Output", "héllo wörld"}, "Write-Output 'héllo wörld'"},
+		{"a pipe belongs to the argument, not the shell", []string{"Select-String", "a|b"}, `Select-String 'a|b'`},
+		{"nothing to run", nil, ""},
+		// A quoted string in command position is an expression, not a
+		// command: PowerShell would print the path instead of running it.
+		{"a quoted executable needs the call operator", []string{`C:\Program Files\app\a.exe`, "-v"}, `& 'C:\Program Files\app\a.exe' -v`},
+		{"a bare executable does not", []string{`C:\tools\a.exe`, "-v"}, `C:\tools\a.exe -v`},
+	}
+	for _, c := range cases {
+		if got := QuotePowerShell(c.argv); got != c.want {
+			t.Errorf("%s: got %s, want %s", c.name, got, c.want)
+		}
+	}
+}

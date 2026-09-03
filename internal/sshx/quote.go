@@ -35,3 +35,37 @@ func quoteArg(a string) string {
 	}
 	return "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
 }
+
+// psSafeArg matches the argv elements PowerShell's argument parser hands to
+// the command unchanged. Narrower than safeArg on purpose: in argument
+// position % is an alias for ForEach-Object, @ starts a splat, and a comma
+// builds an array, so none of them survive a round trip bare.
+var psSafeArg = regexp.MustCompile(`^[A-Za-z0-9._/:=+\\-]+$`)
+
+// QuotePowerShell joins argv into the one command string an SSH session
+// carries to a guest whose default shell is PowerShell. Single quotes are the
+// only PowerShell quoting that expands nothing at all - $var, backticks and
+// $(...) stay literal inside them - and a single quote is written twice to
+// spell itself.
+//
+// A quoted first element would be a string expression rather than a command,
+// so it gets the call operator: `& 'C:\Program Files\x.exe'` runs the program,
+// 'C:\Program Files\x.exe' on its own just prints the path.
+func QuotePowerShell(argv []string) string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		out[i] = quotePSArg(a)
+	}
+	cmd := strings.Join(out, " ")
+	if len(argv) > 0 && out[0] != argv[0] {
+		cmd = "& " + cmd
+	}
+	return cmd
+}
+
+func quotePSArg(a string) string {
+	if psSafeArg.MatchString(a) {
+		return a
+	}
+	return "'" + strings.ReplaceAll(a, "'", "''") + "'"
+}
