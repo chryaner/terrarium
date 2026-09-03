@@ -84,7 +84,7 @@ func (e *Engine) Create(name string, o CreateOpts, progress func(string)) (*Env,
 	// Recorded before the hardware is built, so the rollback below has
 	// something to remove and `terrarium rm` can reach the VM if this process
 	// dies first. An empty Golden is what marks an env with no credentials.
-	env := &Env{VMName: vmName, SSHPort: port, Created: time.Now()}
+	env := &Env{VMName: vmName, SSHPort: port, Created: time.Now(), OSType: o.OSType}
 	if vm, err := e.findVM(vmName); err == nil {
 		env.UUID = vm.UUID
 	}
