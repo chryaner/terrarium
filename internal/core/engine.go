@@ -542,7 +542,12 @@ func (e *Engine) SSHTarget(name string) (port int, user, password, key string, e
 	}
 	g := e.St.Goldens[env.Golden]
 	if g == nil || g.SSHUser == "" {
-		return 0, "", "", "", fmt.Errorf("golden %q has no SSH user: re-run `terrarium adopt %s --user <user> [--password <pw> | --key <path>]`", env.Golden, env.Golden)
+		vmName := ""
+		if g != nil {
+			vmName = g.VMName
+		}
+		return 0, "", "", "", fmt.Errorf("golden %q has no SSH user: work the login out through screenshot/type, then record it with `%s`",
+			env.Golden, AdoptHint(vmName, env.Golden))
 	}
 	return env.SSHPort, g.SSHUser, g.SSHPassword, g.SSHKey, nil
 }
