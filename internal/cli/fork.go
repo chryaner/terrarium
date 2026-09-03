@@ -39,7 +39,7 @@ var forkCmd = &cobra.Command{
 		}
 		// Same as the MCP env_fork tool, so the env shows up in ~/.ssh/config
 		// however it was created.
-		if err := core.UpdateSSHConfig(e.St); err != nil {
+		if err := refreshSSHConfig(e.St); err != nil {
 			return err
 		}
 		fmt.Printf("ready in %.0fs: `terrarium ssh %s` (port %d)\n",

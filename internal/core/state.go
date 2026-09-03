@@ -16,6 +16,11 @@ type Golden struct {
 	SSHKey   string `json:"ssh_key,omitempty"`
 	// stored in plain text: local dev tool, guest-only credentials
 	SSHPassword string `json:"ssh_password,omitempty"`
+	// Shell is what an SSH session lands in on this golden's guests - posix,
+	// cmd or powershell - and so how exec has to quote a command for them.
+	// Empty on records written before it existed, and on adopted Windows VMs
+	// that have not been reached yet: those are probed on first exec.
+	Shell string `json:"shell,omitempty"`
 	// Owned marks a VM terrarium built itself, so it is ours to delete.
 	// Adopted VMs belong to the user and are left alone.
 	Owned bool `json:"owned,omitempty"`

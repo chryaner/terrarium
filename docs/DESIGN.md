@@ -88,6 +88,25 @@ are obvious and all of them cost time to rediscover:
    finishes. terrarium ejects them itself before snapshotting - a golden that
    boots the installer again on every fork is not a golden.
 
+The post-install does three more things with that one command line, and they
+are what makes a Windows golden behave like a Linux one. It writes the
+generated ed25519 public key into
+`%ProgramData%\ssh\administrators_authorized_keys` - the only
+`AuthorizedKeysFile` sshd's stock config reads for an account in the
+administrators group - and resets that file's ACL to Administrators and SYSTEM,
+without which sshd ignores it and says nothing. It points
+`HKLM\SOFTWARE\OpenSSH\DefaultShell` at `powershell.exe`, so a command sent
+over SSH is parsed once by PowerShell instead of three times by cmd.exe. The
+golden keeps the password as well as the key, because RDP and the console
+still authenticate with it.
+
+That is also why goldens carry a `shell` field. Quoting an argv is
+shell-specific and there is no spelling that works for more than one of them,
+so the record says which: `posix`, `cmd` or `powershell`. Goldens terrarium
+built know their own answer; an adopted or older one is asked once, with
+`echo %COMSPEC%` - cmd expands it, PowerShell echoes it back - and the answer
+is written to state so no later command pays for it.
+
 The install took ten and a half minutes measured on a fast desktop, and can
 plausibly take half an hour on modest hardware, against roughly 40 seconds for
 a Linux cloud image. That is the price of a real installer, and it is paid

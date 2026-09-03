@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chryaner/terrarium/internal/core"
@@ -239,6 +241,7 @@ type goldenAdoptInput struct {
 	User         string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
 	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
 	Key          string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
+	Shell        string `json:"shell,omitempty" jsonschema:"what an SSH session lands in: posix, cmd or powershell; Windows guests are probed on first exec when unset"`
 	TakeSnapshot bool   `json:"take_snapshot,omitempty" jsonschema:"create the snapshot if the VM does not have it yet; this modifies the user's VM"`
 }
 
@@ -247,7 +250,7 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.TakeSnapshot)
+	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.TakeSnapshot)
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
@@ -454,7 +457,9 @@ func envStart(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.C
 
 type envExecInput struct {
 	Name       string `json:"name" jsonschema:"name of the environment to run in"`
-	Command    string `json:"command" jsonschema:"shell command to run in the guest"`
+	Command    string `json:"command,omitempty" jsonschema:"shell command to run in the guest; omit when passing script"`
+	Script     string `json:"script,omitempty" jsonschema:"multi-line script to run instead of command; it reaches the shell on stdin so nothing in it is quoted or split"`
+	Shell      string `json:"shell,omitempty" jsonschema:"run under this shell instead of the guest's own: powershell, cmd or sh"`
 	TimeoutSec int    `json:"timeout_sec,omitempty" jsonschema:"seconds to wait before giving up (default 300)"`
 }
 
@@ -472,6 +477,10 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
+	command, stdin, err := execRequest(in, func() (string, error) { return e.ShellFor(in.Name) })
+	if err != nil {
+		return nil, envExecOutput{}, err
+	}
 
 	timeout := core.DefaultExecTimeout
 	if in.TimeoutSec > 0 {
@@ -479,7 +488,7 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	}
 
 	var out sshx.OutputBuffer
-	code, err := sshx.ExecTimeout(ctx, timeout, port, user, password, key, in.Command, &out, &out)
+	code, err := sshx.ExecScript(ctx, timeout, port, user, password, key, command, stdin, &out, &out)
 	if err != nil {
 		var timedOut *sshx.TimeoutError
 		if errors.As(err, &timedOut) {
@@ -490,6 +499,61 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 		return nil, envExecOutput{}, err
 	}
 	return nil, envExecOutput{ExitCode: code, Output: tail(out.String())}, nil
+}
+
+// execRequest turns the tool's input into the command an SSH session carries
+// and, for a script, what to feed its stdin. guestShell reports what the
+// guest's own sshd hands a command line to, and is only called when the
+// answer is needed.
+//
+// A plain command with no shell named is passed through untouched: the guest's
+// own shell reads it, which is what the description promises and what the
+// pipes and redirects in it depend on. A script, and anything under a named
+// shell that can read one, goes over stdin instead - the one route where no
+// shell but the intended one ever parses the text, and the reason these
+// parameters exist.
+func execRequest(in envExecInput, guestShell func() (string, error)) (string, io.Reader, error) {
+	if (in.Command == "") == (in.Script == "") {
+		return "", nil, fmt.Errorf("pass exactly one of command or script")
+	}
+	if in.Shell == "" && in.Script == "" {
+		return in.Command, nil, nil
+	}
+	if in.Shell == core.ShellCmd {
+		// cmd.exe reads no script from stdin. A command line it can run, but
+		// only through whatever shell sshd hands that line to first. Asked for
+		// implicitly - the guest simply runs cmd - a script gets PowerShell
+		// instead, which every such guest also has.
+		if in.Script != "" {
+			return "", nil, fmt.Errorf("shell cmd cannot run a script: use powershell, or a plain command")
+		}
+		return "cmd /c " + in.Command, nil, nil
+	}
+	shell, err := requestedShell(in.Shell, guestShell)
+	if err != nil {
+		return "", nil, err
+	}
+	text := in.Script
+	if text == "" {
+		text = in.Command
+	}
+	return core.ScriptCommand(shell), strings.NewReader(text), nil
+}
+
+// requestedShell resolves the shell parameter, asking the guest only when it
+// was left out. sh is what the parameter is documented as; posix is what a
+// golden records.
+func requestedShell(want string, guestShell func() (string, error)) (string, error) {
+	switch want {
+	case "":
+		return guestShell()
+	case "sh":
+		return core.ShellPOSIX, nil
+	}
+	if !core.ValidShell(want) {
+		return "", fmt.Errorf("unknown shell %q: one of powershell, cmd, sh", want)
+	}
+	return want, nil
 }
 
 // tail keeps the end of the output: that is where the error is.

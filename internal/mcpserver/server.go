@@ -166,6 +166,11 @@ func newServer() *mcp.Server {
 		Description: "Run a shell command inside an environment over SSH and return its exit code and output. " +
 			"The command is one shell string: pipes, redirects, globs and quoting are interpreted by the " +
 			"guest shell, unlike the CLI's `terrarium exec`, which passes its arguments literally. " +
+			"Which shell that is: /bin/sh on Linux guests; on a Windows guest, the shell recorded for its " +
+			"golden, which is PowerShell for a golden terrarium built and cmd.exe for an older or adopted " +
+			"one, unless `terrarium adopt --shell` said otherwise. Pass shell (powershell, cmd or sh) to " +
+			"run under a different one, and script instead of command for anything multi-line or heavily " +
+			"quoted - a script reaches the shell on stdin, so nothing in it is re-parsed on the way. " +
 			"The environment must be running. Commands run as a user with passwordless sudo, so this can " +
 			"change or destroy anything inside the guest - the host is not affected. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +

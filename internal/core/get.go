@@ -86,7 +86,7 @@ func (e *Engine) get(image string, cpus, memMB int, force bool, depth int, progr
 	// cloud-init to seed.
 	if r.Format == recipe.FormatISO {
 		progress(fmt.Sprintf("creating %s (%d cpu, %d MB, %d GB disk)", vmName, cpus, memMB, r.DiskGB))
-		return e.buildWindowsGolden(r, image, vmName, imagePath, cpus, memMB, progress)
+		return e.buildWindowsGolden(r, image, vmName, imagePath, filepath.Join(dir, "goldens"), cpus, memMB, progress)
 	}
 
 	progress("generating SSH key and cloud-init seed")
@@ -338,6 +338,7 @@ func (e *Engine) buildGolden(image, vmName, keyPath, isoPath string, progress fu
 		VMName:  vmName,
 		SSHUser: seed.User,
 		SSHKey:  keyPath,
+		Shell:   ShellPOSIX,
 	}, progress)
 }
 

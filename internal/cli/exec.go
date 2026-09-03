@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -12,7 +14,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var execTimeout time.Duration
+var (
+	execTimeout time.Duration
+	execShell   string
+	execScript  bool
+)
 
 var execCmd = &cobra.Command{
 	Use:   "exec <env> -- <command...>",
@@ -27,11 +33,34 @@ A leading VAR=value word is the exception the guest shell still reads as its
 own: exec t1 -- FOO=bar cmd runs cmd with FOO set, it does not pass FOO=bar to
 a command called cmd.
 
-Windows guests are the other exception: their commands are joined for cmd.exe,
-which has no single-quote syntax to reconstruct argv with.`,
+The quoting follows the shell the guest's sshd hands the command to. That is
+/bin/sh on Linux, PowerShell on a Windows golden terrarium built, and cmd.exe
+on an older or adopted one - cmd has no quoting that rebuilds an argv, so
+there its words go over as typed.
+
+  --shell {powershell,cmd,sh}  run under this shell instead
+  --stdin                      read a whole script from stdin and run that
+
+--stdin takes no -- command: the script crosses as the shell's own stdin, so
+nothing in it is quoted, escaped or split on the way.
+
+  terrarium exec t1 --stdin < setup.ps1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if cmd.ArgsLenAtDash() != 1 || len(args) < 2 {
+		if execScript {
+			if len(args) != 1 || cmd.ArgsLenAtDash() != -1 {
+				return fmt.Errorf("usage: terrarium exec <env> --stdin < script")
+			}
+			// A script reaches its shell on stdin, and cmd.exe has no way to
+			// read one there. Saying so beats quietly running it elsewhere.
+			if execShell == "cmd" {
+				return fmt.Errorf("--stdin cannot use cmd: it has no script mode, use --shell powershell")
+			}
+		} else if cmd.ArgsLenAtDash() != 1 || len(args) < 2 {
 			return fmt.Errorf("usage: terrarium exec <env> -- <command...>")
+		}
+		want, err := shellFlag(execShell)
+		if err != nil {
+			return err
 		}
 		e, err := core.NewEngine()
 		if err != nil {
@@ -41,27 +70,31 @@ which has no single-quote syntax to reconstruct argv with.`,
 		if err != nil {
 			return err
 		}
-		// Argv is quoted so the guest shell rebuilds it exactly. Joining it
-		// raw let that shell re-split the arguments: a `bash -c '...'` payload
-		// word-split, and a | inside a sed expression became a remote pipe.
-		//
-		// The quoting is POSIX, and Windows OpenSSH runs commands through
-		// cmd.exe, which does not strip single quotes - `'dir' 'C:\x'` would
-		// be no command at all there. So Windows guests keep the raw join they
-		// work with today, and the guest type is only looked up when quoting
-		// changed something: `exec t1 -- uname -a` costs no VBoxManage call.
-		command := sshx.QuotePOSIX(args[1:])
-		if raw := strings.Join(args[1:], " "); command != raw {
-			win, err := e.GuestIsWindows(args[0])
+		// What sshd will hand the command line to, whatever shell is wanted:
+		// it parses that line before the wanted shell ever sees it. Recorded
+		// on the golden, so this is a lookup rather than a round trip once a
+		// golden has been reached one time.
+		have, err := e.ShellFor(args[0])
+		if err != nil {
+			return err
+		}
+		if want == "" {
+			want = have
+		}
+
+		var stdin io.Reader
+		var command string
+		if execScript {
+			script, err := io.ReadAll(os.Stdin)
 			if err != nil {
 				return err
 			}
-			if win {
-				command = raw
-			}
+			stdin, command = bytes.NewReader(script), core.ScriptCommand(want)
+		} else {
+			command = execCommand(want, have, args[1:])
 		}
-		code, err := sshx.ExecTimeout(context.Background(), execTimeout,
-			port, user, password, key, command, os.Stdout, os.Stderr)
+		code, err := sshx.ExecScript(context.Background(), execTimeout,
+			port, user, password, key, command, stdin, os.Stdout, os.Stderr)
 		if err != nil {
 			return err
 		}
@@ -72,8 +105,60 @@ which has no single-quote syntax to reconstruct argv with.`,
 	},
 }
 
+// shellFlag maps what --shell accepts to what a golden records. sh is the
+// name of the thing being asked for on a Linux guest; posix is what the state
+// file calls it, and both are accepted rather than one being a trap.
+func shellFlag(v string) (string, error) {
+	switch v {
+	case "":
+		return "", nil
+	case "sh":
+		return core.ShellPOSIX, nil
+	}
+	if !core.ValidShell(v) {
+		return "", fmt.Errorf("unknown --shell %q: one of powershell, cmd, sh", v)
+	}
+	return v, nil
+}
+
+// execCommand builds the one command string an SSH session carries. want is
+// the shell that has to read the command; have is the shell sshd will hand
+// the line to. Equal, the quoting is the whole job. Different, the line has to
+// start the wanted shell - and it still passes through the guest's own shell
+// first, so it carries only what survives both.
+func execCommand(want, have string, argv []string) string {
+	if want == have {
+		return quoteFor(want, argv)
+	}
+	switch want {
+	case core.ShellPowerShell:
+		return "powershell -NoProfile -NonInteractive -Command " + sshx.QuotePowerShell(argv)
+	case core.ShellCmd:
+		return "cmd /c " + strings.Join(argv, " ")
+	default:
+		return sshx.QuotePOSIX([]string{"sh", "-c", sshx.QuotePOSIX(argv)})
+	}
+}
+
+func quoteFor(shell string, argv []string) string {
+	switch shell {
+	case core.ShellPowerShell:
+		return sshx.QuotePowerShell(argv)
+	case core.ShellCmd:
+		// cmd.exe has no quoting that rebuilds an argv - 'dir' 'C:\x' is no
+		// command at all there - so its words go over joined, as typed.
+		return strings.Join(argv, " ")
+	default:
+		return sshx.QuotePOSIX(argv)
+	}
+}
+
 func init() {
 	execCmd.Flags().DurationVar(&execTimeout, "timeout", core.DefaultExecTimeout,
 		"give up if the command has not finished in this long")
+	execCmd.Flags().StringVar(&execShell, "shell", "",
+		"run the command under this shell: powershell, cmd or sh")
+	execCmd.Flags().BoolVar(&execScript, "stdin", false,
+		"read a script from stdin and run it instead of a -- command")
 	rootCmd.AddCommand(execCmd)
 }

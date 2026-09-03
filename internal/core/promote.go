@@ -31,6 +31,9 @@ func promoteChecks(st *State, envName, image string) (*Env, *Golden, error) {
 		g.SSHUser = src.SSHUser
 		g.SSHPassword = src.SSHPassword
 		g.SSHKey = src.SSHKey
+		// The shell comes with the disk too, so the copy does not have to be
+		// probed again.
+		g.Shell = src.Shell
 	}
 	return env, g, nil
 }

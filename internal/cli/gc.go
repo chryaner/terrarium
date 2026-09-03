@@ -35,7 +35,7 @@ left alone however old they are. Use --dry-run to see what would go first.`,
 			}
 			return nil
 		}
-		if err := core.UpdateSSHConfig(e.St); err != nil {
+		if err := refreshSSHConfig(e.St); err != nil {
 			return err
 		}
 		fmt.Printf("removed %d env(s)\n", len(removals))
