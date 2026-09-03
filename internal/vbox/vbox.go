@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -49,6 +50,11 @@ type StorageAttachment struct {
 type Client struct {
 	Exe     string
 	Timeout time.Duration
+
+	// The guest-type catalogue is read once and kept: see osTypeIDs.
+	osTypesOnce sync.Once
+	osTypes     map[string]string
+	osTypesErr  error
 }
 
 func Locate() (string, error) {
@@ -79,14 +85,26 @@ func (c *Client) run(args ...string) (string, error) {
 }
 
 func (c *Client) runT(timeout time.Duration, args ...string) (string, error) {
+	out, err := c.runRaw(timeout, args...)
+	if err != nil {
+		return "", err
+	}
+	return out, nil
+}
+
+// runRaw hands back the output whether or not the command succeeded, for the
+// callers that can still read something useful out of a failure. Everything
+// else goes through runT, which drops the output of a failed call so it
+// cannot be mistaken for a result.
+func (c *Client) runRaw(timeout time.Duration, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, c.Exe, args...).CombinedOutput()
 	if ctx.Err() == context.DeadlineExceeded {
-		return "", fmt.Errorf("VBoxManage %s timed out after %s (VBoxSVC may be wedged)", args[0], timeout)
+		return string(out), fmt.Errorf("VBoxManage %s timed out after %s (VBoxSVC may be wedged)", args[0], timeout)
 	}
 	if err != nil {
-		return "", fmt.Errorf("VBoxManage %s: %w\n%s", args[0], err, strings.TrimSpace(string(out)))
+		return string(out), fmt.Errorf("VBoxManage %s: %w\n%s", args[0], err, strings.TrimSpace(string(out)))
 	}
 	return string(out), nil
 }
@@ -193,6 +211,20 @@ func (c *Client) OSType(vm string) (string, error) {
 	return "", fmt.Errorf("no ostype in showvminfo output for %s", vm)
 }
 
+// CPUMem reports the hardware a VM is configured with, for `terrarium info`.
+// A value VirtualBox does not report comes back as zero rather than an error:
+// the rest of the report is still worth printing.
+func (c *Client) CPUMem(vm string) (cpus, memMB int, err error) {
+	out, err := c.run("showvminfo", vm, "--machinereadable")
+	if err != nil {
+		return 0, 0, err
+	}
+	kv := parseMachineReadable(out)
+	cpus, _ = strconv.Atoi(kv["cpus"])
+	memMB, _ = strconv.Atoi(kv["memory"])
+	return cpus, memMB, nil
+}
+
 func (c *Client) HasSnapshot(vm, name string) (bool, error) {
 	out, err := c.run("snapshot", vm, "list", "--machinereadable")
 	if err != nil {
@@ -249,16 +281,26 @@ func (c *Client) CloneFull(src, dst string) error {
 	return err
 }
 
-// ImportOVA registers an appliance as a new VM, overriding the CPU and memory
-// the vendor shipped. --eula accept applies to vsys 0 selected above it.
+// ImportOVA registers an appliance as a new VM. Zero cpus or memory keeps
+// what the vendor shipped, which is what `terrarium import` wants for an
+// appliance nobody has re-sized; `get` always passes both.
 func (c *Client) ImportOVA(ovaPath, vmName string, cpus, memMB int) error {
-	_, err := c.runT(importTimeout, "import", ovaPath,
-		"--vsys", "0",
-		"--vmname", vmName,
-		"--cpus", strconv.Itoa(cpus),
-		"--memory", strconv.Itoa(memMB),
-		"--eula", "accept")
+	_, err := c.runT(importTimeout, importArgs(ovaPath, vmName, cpus, memMB)...)
 	return err
+}
+
+// importArgs is separate so the flag list can be tested: an import takes
+// minutes to fail, which is a slow way to find out a flag was wrong.
+func importArgs(ovaPath, vmName string, cpus, memMB int) []string {
+	args := []string{"import", ovaPath, "--vsys", "0", "--vmname", vmName}
+	if cpus > 0 {
+		args = append(args, "--cpus", strconv.Itoa(cpus))
+	}
+	if memMB > 0 {
+		args = append(args, "--memory", strconv.Itoa(memMB))
+	}
+	// --eula accept applies to the vsys 0 selected above it.
+	return append(args, "--eula", "accept")
 }
 
 func (c *Client) StorageControllers(vm string) ([]StorageController, error) {
