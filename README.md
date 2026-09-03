@@ -206,7 +206,9 @@ ISO you provide - see [Images](#images) for where to put it and why.
 $ terrarium get debian-12          # build a golden: download, boot, snapshot (~40s)
 $ terrarium fork debian-12 t1      # a throwaway machine, SSH-ready in ~20s
 $ terrarium exec t1 -- uname -a
+$ terrarium cp ./app.tar t1:/tmp/  # files in or out, over the env's own SSH
 $ terrarium ssh t1
+$ terrarium create s11 --iso suse.iso --ostype OpenSUSE_64  # install one by hand
 $ terrarium revert t1              # back to clean in seconds
 $ terrarium rm t1
 ```
@@ -274,6 +276,16 @@ forks are driven through screenshot, click, type and keys rather than `exec`,
 and its recipe needs a product key you supply in a local override. Recipe
 details, private mirrors and the unattended-install internals are in
 [docs/DESIGN.md](docs/DESIGN.md).
+
+### Install any OS from an ISO by hand
+
+Some systems have neither a cloud image nor an installer that can be answered
+in advance. `terrarium create <name> --iso <path> --ostype <type>` builds a
+blank machine with the ISO in its drive and boots it, and you answer the
+installer through `screenshot`, `type`, `keys` and `click` - `revert` puts the
+blank disk back if you want to start over. The machine has no credentials
+until the install is done: `promote` it into a golden, then `adopt` that golden
+with the user and password you created inside it.
 
 ### Layer your own
 
