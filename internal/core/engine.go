@@ -427,7 +427,14 @@ func (e *Engine) Revert(name string, progress func(string)) error {
 	if err := e.VB.WaitOff(env.VMName, 30*time.Second); err != nil {
 		return err
 	}
-	progress("restoring clean state")
+	if env.Golden == "" {
+		// The clean snapshot of an ISO-installed env is the blank disk it was
+		// created with, so this is not "back to a working machine" - it is
+		// starting the installation over.
+		progress("restoring clean state (blank disk: this restarts the install)")
+	} else {
+		progress("restoring clean state")
+	}
 	// By name, not RestoreCurrent: taking a named snapshot makes that one
 	// current, so "current" would rewind to the user's last `terrarium
 	// snapshot` rather than the clean state this promises.
@@ -522,6 +529,14 @@ func (e *Engine) SSHTarget(name string) (port int, user, password, key string, e
 	env := e.St.Envs[name]
 	if env == nil {
 		return 0, "", "", "", fmt.Errorf("no env %q", name)
+	}
+	// An env from `terrarium create` has no golden at all: nobody has told
+	// terrarium what account the OS being installed inside it ends up with,
+	// and there may not be one yet. Point at the way out rather than at
+	// adopting a golden that does not exist.
+	if env.Golden == "" {
+		return 0, "", "", "", fmt.Errorf("env %q has no credentials: it was created from an ISO, so drive it with `terrarium screenshot/type/keys/click`.\nonce the install is finished: `terrarium promote %s <image>`, then `terrarium adopt %s<image> --user <user> [--password <pw> | --key <path>]`",
+			name, name, goldenPrefix)
 	}
 	g := e.St.Goldens[env.Golden]
 	if g == nil || g.SSHUser == "" {

@@ -29,9 +29,13 @@ func (g *Golden) hasCreds() bool {
 }
 
 type Env struct {
-	VMName  string    `json:"vm_name"`
-	UUID    string    `json:"uuid,omitempty"`
-	Golden  string    `json:"golden"`
+	VMName string `json:"vm_name"`
+	UUID   string `json:"uuid,omitempty"`
+	// Golden is the image this env was forked from, empty for an env
+	// `terrarium create` built from an ISO: that machine is an installation
+	// in progress, with no image behind it and no credentials until it is
+	// promoted and adopted.
+	Golden  string    `json:"golden,omitempty"`
 	SSHPort int       `json:"ssh_port"`
 	Created time.Time `json:"created"`
 	// Share is the host folder mounted at GuestSharePath, empty if none.

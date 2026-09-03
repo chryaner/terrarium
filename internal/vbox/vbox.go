@@ -364,6 +364,26 @@ func (c *Client) CreateDynamicDisk(path string, sizeMB int) error {
 	return err
 }
 
+// SetBootOrder sets the boot device order, first device first, from
+// VirtualBox's vocabulary: none, floppy, dvd, disk, net. The four slots are
+// always written, so a device left out is cleared rather than inherited.
+//
+// disk-then-dvd is what an install-by-hand VM wants: a blank disk has no boot
+// sector, so the BIOS falls through to the installer, and the installed
+// system boots from disk afterwards with no eject step.
+func (c *Client) SetBootOrder(vm string, devices ...string) error {
+	args := []string{"modifyvm", vm}
+	for i := 0; i < 4; i++ {
+		dev := "none"
+		if i < len(devices) {
+			dev = devices[i]
+		}
+		args = append(args, fmt.Sprintf("--boot%d", i+1), dev)
+	}
+	_, err := c.run(args...)
+	return err
+}
+
 // SetFirmwareTPM gives a VM the firmware and TPM a modern Windows expects.
 func (c *Client) SetFirmwareTPM(vm string, efi, tpm bool) error {
 	args := []string{"modifyvm", vm}
