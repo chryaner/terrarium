@@ -24,6 +24,12 @@ const (
 	volumeLabel = "cidata"
 )
 
+// KeyPath is where an image's private key lives. The Windows install path
+// builds no seed ISO but shares the layout, so both find the key the same way.
+func KeyPath(baseDir, image string) string {
+	return filepath.Join(baseDir, image, keyFile)
+}
+
 // DefaultPackages is what an image gets when its recipe says nothing.
 var DefaultPackages = []string{"virtualbox-guest-utils"}
 
@@ -50,7 +56,7 @@ func Generate(baseDir, image string, packages []string) (keyPath, isoPath string
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", "", err
 	}
-	keyPath = filepath.Join(dir, keyFile)
+	keyPath = KeyPath(baseDir, image)
 	// The generator is shared with the Windows install path, which installs
 	// the same kind of key by a different route.
 	pubKey, err := sshx.EnsureKey(keyPath, User)

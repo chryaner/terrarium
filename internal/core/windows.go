@@ -2,11 +2,13 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chryaner/terrarium/internal/recipe"
+	"github.com/chryaner/terrarium/internal/seed"
 	"github.com/chryaner/terrarium/internal/sshx"
 	"github.com/chryaner/terrarium/internal/vbox"
 )
@@ -21,12 +23,37 @@ import (
 // The capability installer usually adds the firewall rule itself; usually is
 // not good enough for something that decides whether the golden is reachable,
 // so it is created here too and failure to create it is ignored.
-const windowsPostInstall = `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
-	`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
-	`Set-Service -Name sshd -StartupType Automatic; ` +
-	`Start-Service sshd; ` +
-	`New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True ` +
-	`-Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue"`
+//
+// It does three things past starting sshd. PowerShell becomes the SSH default
+// shell, so a command sent to the guest needs one layer of quoting instead of
+// cmd.exe's three. The generated public key goes into
+// administrators_authorized_keys - the file sshd's stock config reads for
+// members of the administrators group - so a Windows golden is key-based like
+// the Linux ones and plain ssh and scp work from the generated ssh-config
+// without a password prompt. And that file's ACL is reset to Administrators
+// and SYSTEM: sshd ignores it, silently, if anyone else can write it.
+func windowsPostInstall(pubKey string) string {
+	return `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
+		`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
+		`Set-Service -Name sshd -StartupType Automatic; ` +
+		`Start-Service sshd; ` +
+		`New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True ` +
+		`-Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; ` +
+		`$k = 'HKLM:\SOFTWARE\OpenSSH'; ` +
+		`if (-not (Test-Path $k)) { New-Item -Path $k -Force }; ` +
+		`New-ItemProperty -Path $k -Name DefaultShell -Value '` + windowsDefaultShell + `' -PropertyType String -Force; ` +
+		`$d = Join-Path $env:ProgramData ssh; ` +
+		`New-Item -Path $d -ItemType Directory -Force; ` +
+		`$a = Join-Path $d administrators_authorized_keys; ` +
+		`Set-Content -Path $a -Value '` + pubKey + `'; ` +
+		`icacls $a /inheritance:r /grant Administrators:F /grant SYSTEM:F"`
+}
+
+// windowsDefaultShell is what sshd hands an exec request to once the
+// post-install has pointed it there. Windows PowerShell rather than pwsh: it
+// is in the box, and installing anything else would be another thing to go
+// wrong an hour into an install.
+const windowsDefaultShell = `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 
 // windowsShutdown is the Windows spelling of `shutdown -h now`.
 const windowsShutdown = "shutdown /s /t 0"
@@ -70,7 +97,7 @@ func (e *Engine) GuestIsWindows(envName string) (bool, error) {
 // paths there is nothing to import: VirtualBox drives Windows setup through
 // its own generated answer file, which takes tens of minutes. That cost is
 // paid once - forks of the resulting golden boot at normal speed.
-func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath string, cpus, memMB int, progress func(string)) (*Golden, error) {
+func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, goldensDir string, cpus, memMB int, progress func(string)) (*Golden, error) {
 	// Checked before the install, not when the golden is recorded: a bad user
 	// name should not cost forty minutes to find out about.
 	if !validSSHUser(r.User) {
@@ -97,14 +124,14 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath stri
 	}
 
 	// From here the VM is registered, so failures leave it for inspection.
-	g, err := e.installWindows(r, image, vmName, isoPath, filepath.Join(folder, vmName), cpus, memMB, progress)
+	g, err := e.installWindows(r, image, vmName, isoPath, goldensDir, filepath.Join(folder, vmName), cpus, memMB, progress)
 	if err != nil {
 		return nil, leftRegistered(vmName, err)
 	}
 	return g, nil
 }
 
-func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolder string, cpus, memMB int, progress func(string)) (*Golden, error) {
+func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, goldensDir, vmFolder string, cpus, memMB int, progress func(string)) (*Golden, error) {
 	if err := e.VB.SetFirmwareTPM(vmName, r.UseEFI(), r.UseTPM()); err != nil {
 		return nil, err
 	}
@@ -146,10 +173,22 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 	}
 
 	// A guest with no SSH still needs a completion signal, so its whole
-	// post-install is a shutdown: setup finishing turns the machine off.
-	postCmd := windowsPostInstall
-	if !r.UseSSH() {
-		postCmd = nt5PostInstall
+	// post-install is a shutdown: setup finishing turns the machine off, and
+	// there is nothing to install a key for.
+	postCmd := nt5PostInstall
+	var keyPath string
+	if r.UseSSH() {
+		keyPath = seed.KeyPath(goldensDir, image)
+		if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+			return nil, err
+		}
+		// The same generator the cloud images use; the post-install installs
+		// the public half where cloud-init would have.
+		pubKey, err := sshx.EnsureKey(keyPath, r.User)
+		if err != nil {
+			return nil, err
+		}
+		postCmd = windowsPostInstall(pubKey)
 	}
 
 	progress(fmt.Sprintf("unattended install, up to %d min (once per image; forks are seconds)", r.InstallTimeoutMin))
@@ -177,7 +216,7 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 			return nil, fmt.Errorf("%w\nthe install may have stalled: check the console, or C:\\vboxpostinstall.log in the guest", err)
 		}
 		progress("install finished, SSH is up")
-		if err := e.shutdownGuest(vmName, port, r.User, r.Password, "", windowsShutdown, progress); err != nil {
+		if err := e.shutdownGuest(vmName, port, r.User, r.Password, keyPath, windowsShutdown, progress); err != nil {
 			return nil, err
 		}
 	} else {
@@ -194,7 +233,11 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 	g := &Golden{VMName: vmName}
 	if r.UseSSH() {
 		g.SSHUser = r.User
+		g.SSHKey = keyPath
+		// The password stays on the record beside the key: RDP authenticates
+		// with it, and it is what unlocks the console.
 		g.SSHPassword = r.Password
+		g.Shell = ShellPowerShell
 	}
 	return e.recordGolden(image, g, progress)
 }

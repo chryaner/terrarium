@@ -46,3 +46,52 @@ func TestNT5PostInstallIsBatchSafe(t *testing.T) {
 		}
 	}
 }
+
+const testPubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJq4/0d0h7Zc0VLC9WcpqZ+Nn8Jf3Yy4L6xX9x0aBcDe terrarium"
+
+// VirtualBox pastes the post-install into a .cmd, so a single metacharacter
+// costs a forty-minute install to discover.
+func TestWindowsPostInstallIsBatchSafe(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey)
+	for _, c := range []string{"%", "&", "|", "<", ">", "^", "\r", "\n"} {
+		if strings.Contains(cmd, c) {
+			t.Errorf("windowsPostInstall contains cmd metacharacter %q", c)
+		}
+	}
+	// One quoted -Command, so the inner quoting has to be single quotes.
+	if strings.Count(cmd, `"`) != 2 {
+		t.Errorf("expected exactly the one -Command quote pair, got %d quotes", strings.Count(cmd, `"`))
+	}
+	// VirtualBox truncates a long post-install command, and there is no
+	// warning when it does.
+	if len(cmd) > 1500 {
+		t.Errorf("post-install is %d chars, too long to rely on VirtualBox passing it whole", len(cmd))
+	}
+}
+
+// The two things that make a new golden usable the way the Linux ones are:
+// key auth, and a shell that needs one layer of quoting instead of three.
+func TestWindowsPostInstallInstallsKeyAndShell(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey)
+	for _, want := range []string{
+		testPubKey,
+		// sshd reads this file, and only this file, for administrators.
+		"administrators_authorized_keys",
+		// and ignores it silently unless nobody else can write it
+		"icacls",
+		"/inheritance:r",
+		`HKLM:\SOFTWARE\OpenSSH`,
+		"DefaultShell",
+		windowsDefaultShell,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("post-install is missing %q:\n%s", want, cmd)
+		}
+	}
+	// The key has to be written before its ACL is fixed, and both after the
+	// capability that creates the directory.
+	if strings.Index(cmd, "Add-WindowsCapability") > strings.Index(cmd, "Set-Content") ||
+		strings.Index(cmd, "Set-Content") > strings.Index(cmd, "icacls") {
+		t.Errorf("post-install steps are out of order:\n%s", cmd)
+	}
+}

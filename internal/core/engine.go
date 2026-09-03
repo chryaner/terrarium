@@ -70,9 +70,12 @@ func (e *Engine) findVM(name string) (*vbox.VM, error) {
 
 // Adopt records an existing VM+snapshot as a golden image. Re-running
 // updates the record (e.g. to set SSH credentials later).
-func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapshot bool) (*Golden, error) {
+func (e *Engine) Adopt(vmName, snapshot, user, password, key, shell string, takeSnapshot bool) (*Golden, error) {
 	if !validSSHUser(user) {
 		return nil, fmt.Errorf("ssh user contains an illegal character")
+	}
+	if shell != "" && !ValidShell(shell) {
+		return nil, fmt.Errorf("unknown shell %q: one of %s", shell, strings.Join(Shells, ", "))
 	}
 	vm, err := e.findVM(vmName)
 	if err != nil {
@@ -109,6 +112,17 @@ func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapsho
 	}
 	if key != "" {
 		g.SSHKey = key
+	}
+	switch {
+	case shell != "":
+		g.Shell = shell
+	case g.Shell == "" && g.hasCreds():
+		// The golden VM is not running and carries no port forward, so a
+		// Windows guest cannot be asked here: probeShell answers "" for it and
+		// the first exec against a fork settles it. --shell skips that.
+		if ostype, err := e.VB.OSType(vmName); err == nil {
+			g.Shell = probeShell(ostype, nil)
+		}
 	}
 	return g, e.St.Save()
 }
