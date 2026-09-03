@@ -28,6 +28,22 @@ type goldenInfo struct {
 	Snapshot string `json:"snapshot"`
 	SSHUser  string `json:"ssh_user,omitempty"`
 	Owned    bool   `json:"owned"`
+	// OSType and Arch answer "what is this thing" before a fork rather than
+	// after something fails inside the guest.
+	OSType string `json:"ostype,omitempty"`
+	Arch   string `json:"arch,omitempty"`
+}
+
+func describeGolden(name string, g *core.Golden) goldenInfo {
+	return goldenInfo{
+		Name:     name,
+		VMName:   g.VMName,
+		Snapshot: g.Snapshot,
+		SSHUser:  g.SSHUser,
+		Owned:    g.Owned,
+		OSType:   g.OSType,
+		Arch:     core.ArchOf(g.OSType),
+	}
 }
 
 type envInfo struct {
@@ -44,6 +60,12 @@ type envInfo struct {
 
 type nameInput struct {
 	Name string `json:"name" jsonschema:"name of the environment"`
+}
+
+// screenshotInput is nameInput with a wider contract: reading a screen is
+// read-only, so it takes goldens and unmanaged VMs too.
+type screenshotInput struct {
+	Name string `json:"name" jsonschema:"name of the environment, golden image, or VirtualBox VM"`
 }
 
 // --- doctor ---
@@ -115,16 +137,15 @@ func envList(ctx context.Context, _ *mcp.CallToolRequest, _ listInput) (*mcp.Cal
 		}
 	}
 
+	// The guest type is how an agent tells a 32-bit image from a 64-bit one
+	// before forking it, so fill in the records that predate the field.
+	if err := e.FillOSTypes(); err != nil {
+		return nil, listOutput{}, err
+	}
+
 	out := listOutput{Goldens: []goldenInfo{}, Envs: []envInfo{}}
 	for _, name := range sortedKeys(e.St.Goldens) {
-		g := e.St.Goldens[name]
-		out.Goldens = append(out.Goldens, goldenInfo{
-			Name:     name,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		})
+		out.Goldens = append(out.Goldens, describeGolden(name, e.St.Goldens[name]))
 	}
 	for _, name := range sortedKeys(e.St.Envs) {
 		out.Envs = append(out.Envs, describeEnv(name, e.St.Envs[name], running))
@@ -181,16 +202,60 @@ func goldenGet(ctx context.Context, _ *mcp.CallToolRequest, in goldenGetInput) (
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	return nil, goldenGetOutput{
-		Golden: goldenInfo{
-			Name:     in.Image,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		},
-		Log: log,
-	}, nil
+	return nil, goldenGetOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
+}
+
+// --- golden_import ---
+
+type goldenImportInput struct {
+	OVAPath  string `json:"ova_path" jsonschema:"path to the .ova or .ovf appliance file on this machine"`
+	Name     string `json:"name" jsonschema:"name for the new golden image: letters, digits, dots, dashes"`
+	User     string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
+	Password string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
+	Key      string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
+}
+
+func goldenImport(ctx context.Context, _ *mcp.CallToolRequest, in goldenImportInput) (*mcp.CallToolResult, goldenGetOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	var log []string
+	// Hardware is left as the appliance shipped it: nothing here knows what
+	// the machine inside needs, and a vendor image is usually sized already.
+	g, err := e.ImportOVA(in.OVAPath, in.Name, in.User, in.Password, in.Key, 0, 0, progressTo(&log))
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	return nil, goldenGetOutput{Golden: describeGolden(in.Name, g), Log: log}, nil
+}
+
+// --- golden_adopt ---
+
+type goldenAdoptInput struct {
+	VM           string `json:"vm" jsonschema:"name of the existing VirtualBox VM, as shown by env_list or terrarium ls"`
+	Name         string `json:"name,omitempty" jsonschema:"golden name to record it under (default: the VM name)"`
+	Snapshot     string `json:"snapshot,omitempty" jsonschema:"snapshot to fork from (default terrarium-base)"`
+	User         string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
+	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
+	Key          string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
+	TakeSnapshot bool   `json:"take_snapshot,omitempty" jsonschema:"create the snapshot if the VM does not have it yet; this modifies the user's VM"`
+}
+
+func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInput) (*mcp.CallToolResult, goldenGetOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.TakeSnapshot)
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	image := in.Name
+	if image == "" {
+		image = in.VM
+	}
+	return nil, goldenGetOutput{Golden: describeGolden(image, g)}, nil
 }
 
 // --- env_fork ---
@@ -336,16 +401,7 @@ func envPromote(ctx context.Context, _ *mcp.CallToolRequest, in envPromoteInput)
 	if err != nil {
 		return nil, envPromoteOutput{}, err
 	}
-	return nil, envPromoteOutput{
-		Golden: goldenInfo{
-			Name:     in.Image,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		},
-		Log: log,
-	}, nil
+	return nil, envPromoteOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
 }
 
 // --- env_gc ---
@@ -458,7 +514,7 @@ type screenshotOutput struct {
 	Height int `json:"height"`
 }
 
-func envScreenshot(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.CallToolResult, screenshotOutput, error) {
+func envScreenshot(ctx context.Context, _ *mcp.CallToolRequest, in screenshotInput) (*mcp.CallToolResult, screenshotOutput, error) {
 	e, err := engine()
 	if err != nil {
 		return nil, screenshotOutput{}, err

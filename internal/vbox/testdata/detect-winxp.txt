@@ -1,0 +1,9 @@
+VBoxManage.exe: error: Code E_NOTIMPL (0x80004001) (extended info not available)
+VBoxManage.exe: error: Context: "DetectIsoOS()" at line 2235 of file VBoxManageMisc.cpp
+VBoxManage.exe: info: Detected 'C:\isos\winxp.iso' to be:
+    OS TypeId    = WindowsXP
+    OS Version   = sp3
+    OS Flavor    = 
+    OS Languages = en-US
+    OS Hints     = 
+    Unattended installation supported = yes

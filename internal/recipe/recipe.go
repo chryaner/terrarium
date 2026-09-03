@@ -27,12 +27,11 @@ const (
 	FormatISO   = "iso"
 )
 
-// Guest types used when a recipe does not name one. Ignored for OVAs, which
-// carry their own.
-const (
-	defaultOSType    = "Linux_64"
-	defaultISOOSType = "Windows11_64"
-)
+// defaultOSType is the guest type used when a qcow2 recipe does not name one.
+// Ignored for OVAs, which carry their own, and for ISOs, where an unset type
+// means "ask the ISO": guessing there installs a 32-bit guest from a 64-bit
+// disc, which fails deep inside setup.
+const defaultOSType = "Linux_64"
 
 // Defaults for the install-from-ISO path.
 const (
@@ -228,11 +227,8 @@ func parse(path string, data []byte, local bool) (Recipe, error) {
 		return Recipe{}, err
 	}
 
-	if r.OSType == "" {
+	if r.OSType == "" && r.Format != FormatISO {
 		r.OSType = defaultOSType
-		if r.Format == FormatISO {
-			r.OSType = defaultISOOSType
-		}
 	}
 	if r.Format == FormatISO {
 		if r.User == "" {

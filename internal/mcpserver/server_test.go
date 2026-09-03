@@ -52,7 +52,8 @@ func TestToolsAdvertised(t *testing.T) {
 		"doctor", "env_click", "env_create", "env_down", "env_exec", "env_fork",
 		"env_gc", "env_keys", "env_list", "env_promote", "env_pull", "env_push",
 		"env_restore", "env_revert", "env_rm", "env_screenshot", "env_scroll",
-		"env_snapshot", "env_start", "env_type", "golden_get", "recipe_list",
+		"env_snapshot", "env_start", "env_type", "golden_adopt", "golden_get",
+		"golden_import", "recipe_list",
 	}
 	for _, name := range want {
 		if tools[name] == nil {
@@ -74,6 +75,18 @@ func TestServerInstructions(t *testing.T) {
 	for _, want := range []string{"doctor", "ok:false", "rm --golden"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("instructions should mention %q:\n%s", want, got)
+		}
+	}
+}
+
+// The reported misuse: an agent believed adopt needed working credentials up
+// front, so a machine whose login nobody knew looked impossible to take on.
+// The instructions are the only place it reads before choosing a first call.
+func TestInstructionsCoverUnknownCredentials(t *testing.T) {
+	got := connect(t).InitializeResult().Instructions
+	for _, want := range []string{"golden_import", "golden_adopt", "env_screenshot", "env_type"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the unknown-credentials workflow should name %q:\n%s", want, got)
 		}
 	}
 }
@@ -130,6 +143,10 @@ func TestToolSchemas(t *testing.T) {
 		{"recipe_list", nil, nil},
 		{"doctor", nil, nil},
 		{"golden_get", []string{"image"}, []string{"cpus", "memory_mb"}},
+		{"golden_import", []string{"ova_path", "name"}, []string{"user", "password", "key"}},
+		// Only the VM is required: adopting without credentials is the first
+		// half of working out an unknown login, not a mistake.
+		{"golden_adopt", []string{"vm"}, []string{"name", "snapshot", "user", "password", "key", "take_snapshot"}},
 		{"env_fork", []string{"golden", "name"}, []string{"cpus", "memory_mb", "share_host_path", "ttl_seconds"}},
 		{"env_start", []string{"name"}, nil},
 		{"env_exec", []string{"name", "command"}, []string{"timeout_sec"}},

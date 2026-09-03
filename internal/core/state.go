@@ -19,6 +19,11 @@ type Golden struct {
 	// Owned marks a VM terrarium built itself, so it is ours to delete.
 	// Adopted VMs belong to the user and are left alone.
 	Owned bool `json:"owned,omitempty"`
+	// OSType is the VirtualBox guest type id (Windows10_64, Debian_64). It is
+	// what makes the architecture visible before a fork rather than after a
+	// failed install, and it saves a VBoxManage call on every exec. Records
+	// written before terrarium stored it fill in on first read.
+	OSType string `json:"ostype,omitempty"`
 }
 
 // hasCreds reports whether terrarium can reach this golden's guests over SSH.
@@ -46,6 +51,9 @@ type Env struct {
 	// Expires is when `terrarium gc` may remove this env. Zero means never:
 	// TTLs are opt-in, so an env forked without one lives until deleted.
 	Expires time.Time `json:"expires,omitempty"`
+	// OSType is the guest type id, inherited from the golden at fork time.
+	// See Golden.OSType.
+	OSType string `json:"ostype,omitempty"`
 }
 
 // State is terrarium's record of what it manages. VMs not in here are never

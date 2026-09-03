@@ -43,9 +43,17 @@ CLI before env_exec will work on its forks.
 
 Golden images are the opposite: durable, disk-heavy, and owned by the user.
 Nothing here removes one - that is the user's call, via terrarium rm --golden
-in the CLI - so create one (golden_get, env_promote) only when the task asks
-for it, name it something the user will recognise, and report what was
-created.`
+in the CLI - so create one (golden_get, golden_import, env_promote) only when
+the task asks for it, name it something the user will recognise, and report
+what was created.
+
+Credentials are not needed up front. For a machine whose login nobody knows -
+an appliance someone exported years ago, an old VM - call golden_import or
+golden_adopt with no user or password, env_fork it, read the login prompt with
+env_screenshot, and try a guess with env_type. Once something works, call
+golden_adopt again with the user and password that worked: re-running it
+updates the record, and every env forked after that can use env_exec. Never
+guess at credentials in a golden record - record only what you saw work.`
 
 func newServer() *mcp.Server {
 	s := mcp.NewServer(
@@ -84,6 +92,27 @@ func newServer() *mcp.Server {
 			"and flattens the result into the new golden. Use recipe_list for the names " +
 			"that work here. Fails if the golden already exists - rebuilding one is a decision for the human.",
 	}, goldenGet)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "golden_import",
+		Description: "Register an .ova or .ovf appliance file already on this machine as a golden image. " +
+			"Unlike golden_get there is no recipe and no download, and nothing is seeded: an appliance " +
+			"exported from somewhere else has no cloud-init to wait for. The VM is imported, snapshotted " +
+			"where it stands and recorded as a golden env_fork can use. " +
+			"Credentials are optional - import without them, then work the login out through env_fork, " +
+			"env_screenshot and env_type, and record it with golden_adopt. " +
+			"Creates something durable that only the user can remove, so do it when the task asks for it.",
+	}, goldenImport)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "golden_adopt",
+		Description: "Record a VirtualBox VM that already exists on this machine as a golden image env_fork " +
+			"can use. The VM itself is not modified unless take_snapshot is set. " +
+			"Re-running it updates the record, which is how credentials are added later: adopt a machine " +
+			"with no user or password, fork it, read its login prompt with env_screenshot, try a guess " +
+			"with env_type, then adopt again with what worked. " +
+			"Records nothing about the guest that was not observed - never invent a user or password here.",
+	}, goldenAdopt)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_fork",
@@ -145,16 +174,20 @@ func newServer() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_screenshot",
-		Description: "Capture the environment's screen and return it as an image. This is how to see a guest " +
-			"that has no SSH - it needs nothing of the guest, not even a network. The environment must be " +
-			"running. The screen lags behind keystrokes, so after env_type or env_keys take a fresh " +
-			"screenshot to see what actually happened.",
+		Description: "Capture a running machine's screen and return it as an image. This is how to see a guest " +
+			"that has no SSH - it needs nothing of the guest, not even a network. " +
+			"The name can be an environment, a golden image, or any VirtualBox VM by name: reading a screen " +
+			"changes nothing, so this one is safe to point at a machine terrarium does not manage. The " +
+			"input tools (env_type, env_keys, env_click, env_scroll) are environments only. " +
+			"The machine must be running. The screen lags behind keystrokes, so after env_type or env_keys " +
+			"take a fresh screenshot to see what actually happened.",
 	}, envScreenshot)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_type",
 		Description: "Type text into the environment's keyboard, as if a person were at it - the keystrokes go " +
-			"wherever the guest's focus happens to be, so check with env_screenshot first. The environment " +
+			"wherever the guest's focus happens to be, so check with env_screenshot first. Environments " +
+			"only: to type into a golden image, env_fork it and type into the fork. The environment " +
 			"must be running. Takes effect a moment after the call returns.",
 	}, envType)
 

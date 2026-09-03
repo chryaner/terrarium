@@ -232,8 +232,10 @@ func TestISORecipeDefaults(t *testing.T) {
 	if r.User != DefaultUser {
 		t.Errorf("user should default to %q, got %q", DefaultUser, r.User)
 	}
-	if r.OSType != defaultISOOSType {
-		t.Errorf("iso ostype should default to %q, got %q", defaultISOOSType, r.OSType)
+	// Left empty on purpose: the build detects what the ISO installs, so a
+	// default here would silently override the disc.
+	if r.OSType != "" {
+		t.Errorf("iso ostype should stay unset for detection, got %q", r.OSType)
 	}
 	if r.DiskGB != defaultDiskGB {
 		t.Errorf("disk_gb should default to %d, got %d", defaultDiskGB, r.DiskGB)
