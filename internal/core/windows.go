@@ -76,23 +76,6 @@ func isWindowsGuest(ostype string) bool {
 	return strings.HasPrefix(ostype, "Windows")
 }
 
-// GuestIsWindows reports whether an env's guest runs Windows, which decides
-// how a command's argv has to be quoted for its shell. The VM's own guest
-// type is the only answer available: golden records store no OS, a promoted
-// golden has no recipe at all, and a derived recipe's ostype says nothing
-// about its base - it defaults to Linux_64 even when that base is Windows.
-func (e *Engine) GuestIsWindows(envName string) (bool, error) {
-	env := e.St.Envs[envName]
-	if env == nil {
-		return false, fmt.Errorf("no env %q", envName)
-	}
-	ostype, err := e.VB.OSType(env.VMName)
-	if err != nil {
-		return false, err
-	}
-	return isWindowsGuest(ostype), nil
-}
-
 // buildWindowsGolden installs Windows from an ISO. Unlike the cloud image
 // paths there is nothing to import: VirtualBox drives Windows setup through
 // its own generated answer file, which takes tens of minutes. That cost is

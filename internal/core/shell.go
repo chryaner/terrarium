@@ -25,6 +25,21 @@ func ValidShell(s string) bool {
 	return s == ShellPOSIX || s == ShellCmd || s == ShellPowerShell
 }
 
+// ScriptCommand is the shell reading a whole script from its own stdin.
+// Neither line has a metacharacter in it, which is the point: whatever shell
+// sshd hands it to passes it on unchanged, and the script itself is parsed
+// only by its intended reader.
+//
+// cmd.exe has no stdin script mode worth having, so a Windows guest gets
+// PowerShell for scripts whichever shell its sessions land in - a cmd guest
+// still has powershell.exe.
+func ScriptCommand(shell string) string {
+	if shell == ShellPOSIX {
+		return "sh -s"
+	}
+	return "powershell -NoProfile -NonInteractive -Command -"
+}
+
 // shellProbe asks a Windows guest which shell it dropped the session into.
 // cmd.exe expands %COMSPEC% to its own path; PowerShell has no % expansion
 // and echoes the word back untouched.
