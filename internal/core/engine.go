@@ -133,8 +133,8 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell strin
 		// The golden VM is not running and carries no port forward, so a
 		// Windows guest cannot be asked here: probeShell answers "" for it and
 		// the first exec against a fork settles it. --shell skips that.
-		if ostype, err := e.VB.OSType(vmName); err == nil {
-			g.Shell = probeShell(ostype, nil)
+		if g.OSType != "" {
+			g.Shell = probeShell(g.OSType, nil)
 		}
 	}
 	return g, e.St.Save()
