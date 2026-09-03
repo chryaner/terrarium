@@ -76,6 +76,15 @@ func (e *Engine) Copy(src, dst string, recursive, parents bool) error {
 
 // Push copies a host path into an env.
 func (e *Engine) Push(envName, local, remote string, recursive, parents bool) error {
+	transport, err := e.EnvTransport(envName)
+	if err != nil {
+		return err
+	}
+	if transport == TransportGuestControl {
+		// Guest Additions create the destination's parents themselves, so
+		// there is no -p to honour and nothing to do differently without it.
+		return e.copyGuestControl(envName, local, remote, true, recursive)
+	}
 	port, user, password, key, err := e.SSHTarget(envName)
 	if err != nil {
 		return err
@@ -85,6 +94,13 @@ func (e *Engine) Push(envName, local, remote string, recursive, parents bool) er
 
 // Pull copies a path out of an env to the host.
 func (e *Engine) Pull(envName, remote, local string, recursive, parents bool) error {
+	transport, err := e.EnvTransport(envName)
+	if err != nil {
+		return err
+	}
+	if transport == TransportGuestControl {
+		return e.copyGuestControl(envName, local, remote, false, recursive)
+	}
 	port, user, password, key, err := e.SSHTarget(envName)
 	if err != nil {
 		return err

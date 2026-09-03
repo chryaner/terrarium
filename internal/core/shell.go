@@ -148,17 +148,25 @@ func (e *Engine) ShellFor(envName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	shell := probeShell(ostype, func() (string, error) {
-		port, user, password, key, err := e.SSHTarget(envName)
-		if err != nil {
-			return "", err
+	// Nothing to probe on the guestcontrol transport: Guest Additions start a
+	// program rather than a session, so there is no shell for the guest to be
+	// asked about - the record is what decides which one gets launched. Asking
+	// anyway would also recurse, since running the probe goes through here.
+	var ask func() (string, error)
+	if TransportOf(g) == TransportSSH {
+		ask = func() (string, error) {
+			port, user, password, key, err := e.SSHTarget(envName)
+			if err != nil {
+				return "", err
+			}
+			var out sshx.OutputBuffer
+			if _, err := sshx.ExecStreams(port, user, password, key, shellProbe, &out, io.Discard); err != nil {
+				return "", err
+			}
+			return out.String(), nil
 		}
-		var out sshx.OutputBuffer
-		if _, err := sshx.ExecStreams(port, user, password, key, shellProbe, &out, io.Discard); err != nil {
-			return "", err
-		}
-		return out.String(), nil
-	})
+	}
+	shell := probeShell(ostype, ask)
 	if shell == "" {
 		// Every Windows golden built before the post-install set DefaultShell
 		// runs cmd, and cmd is the quoting exec has always used there, so an

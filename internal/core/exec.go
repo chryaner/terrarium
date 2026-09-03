@@ -36,6 +36,13 @@ type ExecRequest struct {
 // It is the single place a command crosses into a guest, so the transport the
 // golden records is applied once, here.
 func (e *Engine) Run(ctx context.Context, envName string, timeout time.Duration, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	transport, err := e.EnvTransport(envName)
+	if err != nil {
+		return -1, err
+	}
+	if transport == TransportGuestControl {
+		return e.runGuestControl(ctx, envName, timeout, command, stdin, stdout, stderr)
+	}
 	port, user, password, key, err := e.SSHTarget(envName)
 	if err != nil {
 		return -1, err

@@ -41,6 +41,13 @@ no credentials, so tell the user to record them with
 ` + "`terrarium adopt <vm> --user <user> [--password <pw> | --key <path>]`" + ` in the
 CLI before env_exec will work on its forks.
 
+A Windows guest with no SSH server - anything older than Windows 10 - is
+reachable a third way when VirtualBox Guest Additions are installed in it:
+golden_adopt it with transport "guestcontrol" plus the guest's user and
+password, and env_exec, env_push and env_pull then work on its forks. Without
+Guest Additions there is no transport at all, and the console tools are the
+only way in.
+
 Golden images are the opposite: durable, disk-heavy, and owned by the user.
 Nothing here removes one - that is the user's call, via terrarium rm --golden
 in the CLI - so create one (golden_get, golden_import, env_promote) only when

@@ -242,6 +242,7 @@ type goldenAdoptInput struct {
 	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
 	Key          string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
 	Shell        string `json:"shell,omitempty" jsonschema:"what an SSH session lands in: posix, cmd or powershell; Windows guests are probed on first exec when unset"`
+	Transport    string `json:"transport,omitempty" jsonschema:"how to reach the guest: ssh (default), or guestcontrol for a Windows with no SSH server, which talks through VirtualBox Guest Additions and needs user and password"`
 	TakeSnapshot bool   `json:"take_snapshot,omitempty" jsonschema:"create the snapshot if the VM does not have it yet; this modifies the user's VM"`
 }
 
@@ -250,7 +251,7 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.TakeSnapshot)
+	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.Transport, in.TakeSnapshot)
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
