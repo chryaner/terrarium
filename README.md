@@ -282,7 +282,8 @@ so you download the ISO once and terrarium runs the real installer unattended:
 3. `terrarium get win10`. Fully unattended: about ten minutes for win10, seven
    for XP.
 
-A win10 golden comes out key-based like the Linux ones: the install generates
+A win10 golden built from this version on comes out key-based like the Linux
+ones (older ones keep their password and cmd shell): the install generates
 an ed25519 pair, puts the public half in the guest and records the private
 one, so `ssh` and `scp` from the generated `~/.ssh/config` entry never prompt.
 Its SSH sessions land in PowerShell, so `exec` quotes for PowerShell rather
@@ -290,13 +291,13 @@ than cmd.exe.
 
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
-and its recipe needs a product key you supply in a local override.
+and its recipe needs a product key you supply in a local override. Recipe
+details, private mirrors and the unattended-install internals are in
+[docs/DESIGN.md](docs/DESIGN.md).
+
 `adopt --transport guestcontrol --user <u> --password <pw>` reaches a Windows
 with no SSH server through VirtualBox Guest Additions instead, if they are
 installed in it, and `exec`, `cp` and the MCP tools then work on its forks.
-Recipe
-details, private mirrors and the unattended-install internals are in
-[docs/DESIGN.md](docs/DESIGN.md).
 
 ### Install any OS from an ISO by hand
 
