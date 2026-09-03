@@ -231,6 +231,89 @@ func envFork(ctx context.Context, _ *mcp.CallToolRequest, in envForkInput) (*mcp
 	return nil, envOutput{Env: describeEnv(in.Name, env, map[string]bool{env.VMName: true}), Log: log}, nil
 }
 
+// --- env_create ---
+
+type envCreateInput struct {
+	Name     string `json:"name" jsonschema:"name for the new environment: letters, digits and dashes"`
+	ISOPath  string `json:"iso_path" jsonschema:"absolute path on THIS host to the installation ISO"`
+	OSType   string `json:"ostype" jsonschema:"VirtualBox guest type, for example Linux_64, OpenSUSE_64 or Windows10_64"`
+	DiskGB   int    `json:"disk_gb,omitempty" jsonschema:"size of the blank disk in GB, default 32; it is dynamic and grows on demand"`
+	CPUs     int    `json:"cpus,omitempty" jsonschema:"CPUs, default 2"`
+	MemoryMB int    `json:"memory_mb,omitempty" jsonschema:"memory in MB, default 2048"`
+}
+
+func envCreate(ctx context.Context, _ *mcp.CallToolRequest, in envCreateInput) (*mcp.CallToolResult, envOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, envOutput{}, err
+	}
+	o := core.CreateOpts{
+		ISO:    in.ISOPath,
+		OSType: in.OSType,
+		DiskGB: in.DiskGB,
+		CPUs:   in.CPUs,
+		MemMB:  in.MemoryMB,
+	}
+	// Unlike cpus and memory, a zero disk is not "inherit": createmedium would
+	// refuse it and the caller usually just left the field out.
+	if o.DiskGB == 0 {
+		o.DiskGB = core.DefaultDiskGB
+	}
+	var log []string
+	// Create rolls a failure back itself, so there is nothing for env_rm to do.
+	env, err := e.Create(in.Name, o, progressTo(&log))
+	if err != nil {
+		return nil, envOutput{}, err
+	}
+	return nil, envOutput{Env: describeEnv(in.Name, env, map[string]bool{env.VMName: true}), Log: log}, nil
+}
+
+// --- env_push / env_pull ---
+
+type envPushInput struct {
+	Name      string `json:"name" jsonschema:"name of the environment to copy into"`
+	LocalPath string `json:"local_path" jsonschema:"path on THIS host to copy from; the server runs on the host, not in the guest"`
+	GuestPath string `json:"guest_path" jsonschema:"path inside the guest to copy to, forward slashes even on Windows guests (C:/Users/terrarium/x)"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"copy a directory and everything under it"`
+}
+
+type envPullInput struct {
+	Name      string `json:"name" jsonschema:"name of the environment to copy out of"`
+	GuestPath string `json:"guest_path" jsonschema:"path inside the guest to copy from, forward slashes even on Windows guests (C:/Users/terrarium/x)"`
+	LocalPath string `json:"local_path" jsonschema:"path on THIS host to copy to; the server runs on the host, not in the guest"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"copy a directory and everything under it"`
+}
+
+type copyOutput struct {
+	Name      string `json:"name"`
+	LocalPath string `json:"local_path"`
+	GuestPath string `json:"guest_path"`
+}
+
+func envPush(ctx context.Context, _ *mcp.CallToolRequest, in envPushInput) (*mcp.CallToolResult, copyOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, copyOutput{}, err
+	}
+	// Parents are created: an agent has no cheap way to check first, and the
+	// CLI's -p exists to stop a typo scattering directories interactively.
+	if err := e.Push(in.Name, in.LocalPath, in.GuestPath, in.Recursive, true); err != nil {
+		return nil, copyOutput{}, err
+	}
+	return nil, copyOutput{Name: in.Name, LocalPath: in.LocalPath, GuestPath: in.GuestPath}, nil
+}
+
+func envPull(ctx context.Context, _ *mcp.CallToolRequest, in envPullInput) (*mcp.CallToolResult, copyOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, copyOutput{}, err
+	}
+	if err := e.Pull(in.Name, in.GuestPath, in.LocalPath, in.Recursive, true); err != nil {
+		return nil, copyOutput{}, err
+	}
+	return nil, copyOutput{Name: in.Name, LocalPath: in.LocalPath, GuestPath: in.GuestPath}, nil
+}
+
 // --- env_promote ---
 
 type envPromoteInput struct {

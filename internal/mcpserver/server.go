@@ -34,6 +34,13 @@ Environments are disposable and cheap to recreate. A guest with SSH
 credentials takes env_exec; one without is driven through env_screenshot,
 env_type, env_keys, env_click and env_scroll.
 
+An OS with no golden image can be installed by hand: env_create makes a blank
+machine with an ISO in its drive, the console tools drive the installer, and
+env_promote turns the finished machine into a golden. That golden starts with
+no credentials, so tell the user to record them with
+` + "`terrarium adopt <vm> --user <user> [--password <pw> | --key <path>]`" + ` in the
+CLI before env_exec will work on its forks.
+
 Golden images are the opposite: durable, disk-heavy, and owned by the user.
 Nothing here removes one - that is the user's call, via terrarium rm --golden
 in the CLI - so create one (golden_get, env_promote) only when the task asks
@@ -87,6 +94,37 @@ func newServer() *mcp.Server {
 			"normal for an old or GUI-only system - env_exec will not work on the result. Drive it with " +
 			"env_screenshot, env_type, env_keys and env_click instead.",
 	}, envFork)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_create",
+		Description: "Create a blank environment with an installation ISO in its DVD drive and boot it, for " +
+			"an OS that has no recipe and no unattended installer - an old distribution, or one whose " +
+			"installer has to be answered by hand. The boot order is disk first, DVD second, so the " +
+			"installer runs while the disk is blank and the installed system boots itself afterwards. " +
+			"The result has no golden image and therefore no credentials: env_exec will not work on it. " +
+			"Drive the installer with env_screenshot, env_type, env_keys and env_click, and note that " +
+			"env_revert puts the blank disk back and restarts the install. When the OS is up, env_promote " +
+			"turns it into a golden - which the user then gives credentials with `terrarium adopt`. " +
+			"iso_path is a path on this host, where the server runs.",
+	}, envCreate)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_push",
+		Description: "Copy a file or directory from this host into an environment, over SFTP on the " +
+			"environment's own SSH connection. local_path is on the host, where this server runs; " +
+			"guest_path is inside the guest and always uses forward slashes, Windows guests included " +
+			"(C:/Users/terrarium/setup.exe). Missing parent directories in the guest are created. " +
+			"Set recursive for a directory. Needs the same credentials env_exec needs.",
+	}, envPush)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_pull",
+		Description: "Copy a file or directory out of an environment onto this host, over SFTP on the " +
+			"environment's own SSH connection. guest_path is inside the guest and always uses forward " +
+			"slashes, Windows guests included; local_path is on the host, where this server runs, and " +
+			"its missing parent directories are created. Set recursive for a directory. " +
+			"Needs the same credentials env_exec needs.",
+	}, envPull)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_start",

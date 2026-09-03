@@ -49,10 +49,10 @@ func TestToolsAdvertised(t *testing.T) {
 	tools := listTools(t)
 
 	want := []string{
-		"doctor", "env_click", "env_down", "env_exec", "env_fork", "env_gc",
-		"env_keys", "env_list", "env_promote", "env_restore", "env_revert",
-		"env_rm", "env_screenshot", "env_scroll", "env_snapshot", "env_start",
-		"env_type", "golden_get", "recipe_list",
+		"doctor", "env_click", "env_create", "env_down", "env_exec", "env_fork",
+		"env_gc", "env_keys", "env_list", "env_promote", "env_pull", "env_push",
+		"env_restore", "env_revert", "env_rm", "env_screenshot", "env_scroll",
+		"env_snapshot", "env_start", "env_type", "golden_get", "recipe_list",
 	}
 	for _, name := range want {
 		if tools[name] == nil {
