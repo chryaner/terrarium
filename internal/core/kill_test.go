@@ -38,7 +38,7 @@ func TestMarkCommand(t *testing.T) {
 			ShellPOSIX, `grep 'a|b' f`, `sh -c 'grep '\''a|b'\'' f # trr:abc123'`,
 		},
 	} {
-		if got := MarkCommand(c.shell, c.command, "abc123"); got != c.want {
+		if got := markCommand(c.shell, c.command, "abc123"); got != c.want {
 			t.Errorf("%s:\n got %s\nwant %s", c.name, got, c.want)
 		}
 	}
@@ -49,7 +49,7 @@ func TestNewMarkerIDIsUnique(t *testing.T) {
 	// reason the id is not the env name.
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {
-		id := NewMarkerID()
+		id := newMarkerID()
 		if seen[id] {
 			t.Fatalf("marker id %q handed out twice", id)
 		}
@@ -62,7 +62,7 @@ func TestNewMarkerIDIsUnique(t *testing.T) {
 // it, and kill the session reading the answer.
 func TestKillScriptDoesNotMatchItself(t *testing.T) {
 	for _, shell := range []string{ShellPOSIX, ShellCmd, ShellPowerShell} {
-		script, scriptShell := KillScript(shell, "abc123")
+		script, scriptShell := killScript(shell, "abc123")
 		if strings.Contains(script, "trr:abc123") {
 			t.Errorf("%s: the kill script spells the marker out: %s", shell, script)
 		}
@@ -82,14 +82,14 @@ func TestKillScriptDoesNotMatchItself(t *testing.T) {
 // The two kills have to be tree kills: the marker is on the shell sshd
 // started, and the process actually hanging is its child.
 func TestKillScriptKillsTheTree(t *testing.T) {
-	win, _ := KillScript(ShellCmd, "abc123")
+	win, _ := killScript(ShellCmd, "abc123")
 	if !strings.Contains(win, "taskkill /F /T /PID") {
 		t.Errorf("Windows kill is not a tree kill:\n%s", win)
 	}
 	if !strings.Contains(win, "$_.ProcessId -ne $PID") {
 		t.Errorf("Windows kill does not exclude its own process:\n%s", win)
 	}
-	posix, _ := KillScript(ShellPOSIX, "abc123")
+	posix, _ := killScript(ShellPOSIX, "abc123")
 	if !strings.Contains(posix, `kill -s TERM -- "-$p"`) {
 		t.Errorf("POSIX kill does not kill the process group:\n%s", posix)
 	}
@@ -124,7 +124,7 @@ func TestKilledError(t *testing.T) {
 // marker exits 1.
 func TestMarkCommandLeavesTheCommandLast(t *testing.T) {
 	for _, shell := range []string{ShellCmd, ShellPowerShell, ShellPOSIX} {
-		marked := MarkCommand(shell, "failing-command", "abc123")
+		marked := markCommand(shell, "failing-command", "abc123")
 		switch shell {
 		case ShellCmd:
 			// Nothing may run after the command, because cmd /c reports what
@@ -150,7 +150,7 @@ func TestMarkCommandLeavesTheCommandLast(t *testing.T) {
 // A process that ignores SIGTERM is still running, and reporting it as killed
 // is the one thing kill-on-timeout must not do.
 func TestPOSIXKillEscalates(t *testing.T) {
-	script, _ := KillScript(ShellPOSIX, "abc123")
+	script, _ := killScript(ShellPOSIX, "abc123")
 	if !strings.Contains(script, "kill -s TERM") || !strings.Contains(script, "kill -s KILL") {
 		t.Errorf("the POSIX kill does not escalate past TERM:\n%s", script)
 	}

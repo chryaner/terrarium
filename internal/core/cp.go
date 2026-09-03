@@ -76,7 +76,7 @@ func (e *Engine) Copy(src, dst string, recursive, parents bool) error {
 
 // Push copies a host path into an env.
 func (e *Engine) Push(envName, local, remote string, recursive, parents bool) error {
-	transport, err := e.EnvTransport(envName)
+	transport, err := e.envTransport(envName)
 	if err != nil {
 		return err
 	}
@@ -92,7 +92,7 @@ func (e *Engine) Push(envName, local, remote string, recursive, parents bool) er
 
 // Pull copies a path out of an env to the host.
 func (e *Engine) Pull(envName, remote, local string, recursive, parents bool) error {
-	transport, err := e.EnvTransport(envName)
+	transport, err := e.envTransport(envName)
 	if err != nil {
 		return err
 	}

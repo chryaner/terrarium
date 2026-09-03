@@ -32,11 +32,11 @@ type ExecRequest struct {
 	Stdout, Stderr io.Writer
 }
 
-// Run executes one command line in an env and returns the guest's exit code.
+// run executes one command line in an env and returns the guest's exit code.
 // It is the single place a command crosses into a guest, so the transport the
 // golden records is applied once, here.
-func (e *Engine) Run(ctx context.Context, envName string, timeout time.Duration, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
-	transport, err := e.EnvTransport(envName)
+func (e *Engine) run(ctx context.Context, envName string, timeout time.Duration, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	transport, err := e.envTransport(envName)
 	if err != nil {
 		return -1, err
 	}
@@ -59,10 +59,10 @@ func (e *Engine) Exec(ctx context.Context, r ExecRequest) (int, error) {
 	command := r.Command
 	id := ""
 	if r.KillOnTimeout {
-		id = NewMarkerID()
-		command = MarkCommand(r.GuestShell, command, id)
+		id = newMarkerID()
+		command = markCommand(r.GuestShell, command, id)
 	}
-	code, err := e.Run(ctx, r.Env, r.Timeout, command, r.Stdin, r.Stdout, r.Stderr)
+	code, err := e.run(ctx, r.Env, r.Timeout, command, r.Stdin, r.Stdout, r.Stderr)
 	var timedOut *sshx.TimeoutError
 	if id != "" && errors.As(err, &timedOut) {
 		return code, e.killMarked(r.Env, r.GuestShell, id, r.Timeout, r.Command)

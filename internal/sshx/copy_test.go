@@ -71,7 +71,7 @@ func TestPushFile(t *testing.T) {
 	src := filepath.Join(dir, "src.txt")
 	write(t, src, "hello guest")
 
-	if err := Push(c, src, guestPath(filepath.Join(dir, "dst.txt")), false, false); err != nil {
+	if err := push(c, src, guestPath(filepath.Join(dir, "dst.txt")), false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, filepath.Join(dir, "dst.txt")); got != "hello guest" {
@@ -91,7 +91,7 @@ func TestPushFileIntoDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := Push(c, src, guestPath(into), false, false); err != nil {
+	if err := push(c, src, guestPath(into), false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, filepath.Join(into, "src.txt")); got != "into dir" {
@@ -106,7 +106,7 @@ func TestPullFile(t *testing.T) {
 	write(t, src, "hello host")
 
 	dst := filepath.Join(dir, "host.txt")
-	if err := Pull(c, guestPath(src), dst, false, false); err != nil {
+	if err := pull(c, guestPath(src), dst, false, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, dst); got != "hello host" {
@@ -122,7 +122,7 @@ func TestPushDirectory(t *testing.T) {
 	write(t, filepath.Join(src, "sub", "b.txt"), "b")
 
 	dst := filepath.Join(dir, "copy")
-	if err := Push(c, src, guestPath(dst), true, false); err != nil {
+	if err := push(c, src, guestPath(dst), true, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, filepath.Join(dst, "a.txt")); got != "a" {
@@ -141,7 +141,7 @@ func TestPullDirectory(t *testing.T) {
 	write(t, filepath.Join(src, "sub", "b.txt"), "b")
 
 	dst := filepath.Join(dir, "copy")
-	if err := Pull(c, guestPath(src), dst, true, false); err != nil {
+	if err := pull(c, guestPath(src), dst, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, filepath.Join(dst, "a.txt")); got != "a" {
@@ -166,22 +166,22 @@ func TestCopyRejects(t *testing.T) {
 		wantErr string
 	}{
 		{"push missing source", func() error {
-			return Push(c, filepath.Join(dir, "nope.txt"), guestPath(filepath.Join(dir, "x")), false, false)
+			return push(c, filepath.Join(dir, "nope.txt"), guestPath(filepath.Join(dir, "x")), false, false)
 		}, "nope.txt"},
 		{"pull missing source", func() error {
-			return Pull(c, guestPath(filepath.Join(dir, "nope.txt")), filepath.Join(dir, "x"), false, false)
+			return pull(c, guestPath(filepath.Join(dir, "nope.txt")), filepath.Join(dir, "x"), false, false)
 		}, "nope.txt"},
 		{"push directory without -r", func() error {
-			return Push(c, tree, guestPath(filepath.Join(dir, "x")), false, false)
+			return push(c, tree, guestPath(filepath.Join(dir, "x")), false, false)
 		}, "pass -r"},
 		{"pull directory without -r", func() error {
-			return Pull(c, guestPath(tree), filepath.Join(dir, "x"), false, false)
+			return pull(c, guestPath(tree), filepath.Join(dir, "x"), false, false)
 		}, "pass -r"},
 		{"push into a missing directory", func() error {
-			return Push(c, file, guestPath(filepath.Join(dir, "no", "such", "f.txt")), false, false)
+			return push(c, file, guestPath(filepath.Join(dir, "no", "such", "f.txt")), false, false)
 		}, "pass -p"},
 		{"pull into a missing directory", func() error {
-			return Pull(c, guestPath(file), filepath.Join(dir, "no", "such", "f.txt"), false, false)
+			return pull(c, guestPath(file), filepath.Join(dir, "no", "such", "f.txt"), false, false)
 		}, "pass -p"},
 	}
 	for _, tc := range cases {
@@ -201,7 +201,7 @@ func TestCopyCreatesParentsWithFlag(t *testing.T) {
 	write(t, file, "f")
 
 	up := filepath.Join(dir, "a", "b", "f.txt")
-	if err := Push(c, file, guestPath(up), false, true); err != nil {
+	if err := push(c, file, guestPath(up), false, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, up); got != "f" {
@@ -209,7 +209,7 @@ func TestCopyCreatesParentsWithFlag(t *testing.T) {
 	}
 
 	down := filepath.Join(dir, "c", "d", "f.txt")
-	if err := Pull(c, guestPath(file), down, false, true); err != nil {
+	if err := pull(c, guestPath(file), down, false, true); err != nil {
 		t.Fatal(err)
 	}
 	if got := read(t, down); got != "f" {

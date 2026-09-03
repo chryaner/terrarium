@@ -27,27 +27,27 @@ const (
 // Transports lists the values in the order help text should show them.
 var Transports = []string{TransportSSH, TransportGuestControl}
 
-// ValidTransport reports whether s names a transport terrarium can use.
-func ValidTransport(s string) bool {
+// validTransport reports whether s names a transport terrarium can use.
+func validTransport(s string) bool {
 	return s == TransportSSH || s == TransportGuestControl
 }
 
-// TransportOf reads a golden's transport. Empty means SSH: every record
+// transportOf reads a golden's transport. Empty means SSH: every record
 // written before the field existed is an SSH one.
-func TransportOf(g *Golden) string {
+func transportOf(g *Golden) string {
 	if g != nil && g.Transport == TransportGuestControl {
 		return TransportGuestControl
 	}
 	return TransportSSH
 }
 
-// EnvTransport reports how an env's guest is reached.
-func (e *Engine) EnvTransport(envName string) (string, error) {
+// envTransport reports how an env's guest is reached.
+func (e *Engine) envTransport(envName string) (string, error) {
 	env := e.St.Envs[envName]
 	if env == nil {
 		return "", fmt.Errorf("no env %q", envName)
 	}
-	return TransportOf(e.St.Goldens[env.Golden]), nil
+	return transportOf(e.St.Goldens[env.Golden]), nil
 }
 
 // guestTarget resolves what a guestcontrol call needs: which VM, and the
@@ -157,7 +157,7 @@ func (e *Engine) runGuestScript(ctx context.Context, vmName string, creds vbox.G
 	}
 	local.Close()
 
-	guestPath := path.Join(dir, "trr-"+NewMarkerID()+ext)
+	guestPath := path.Join(dir, "trr-"+newMarkerID()+ext)
 	if err := e.VB.GuestCopyTo(vmName, creds, local.Name(), guestPath, false); err != nil {
 		return -1, err
 	}

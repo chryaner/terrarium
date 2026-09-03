@@ -119,7 +119,7 @@ func psQuote(s string) string {
 // so anything compound would lose most of what it printed. A block redirects
 // as a whole, and still exits with what its last command exited with.
 func desktopTaskAction(command, outFile, id string) string {
-	return "cmd /c " + MarkCommand(ShellCmd, "( "+command+" ) > "+outFile+" 2>&1", id)
+	return "cmd /c " + markCommand(ShellCmd, "( "+command+" ) > "+outFile+" 2>&1", id)
 }
 
 // exitWithLastCode is what makes a schtasks failure visible. PowerShell exits
@@ -172,7 +172,7 @@ func noConsoleSessionErr(env string) error {
 // stdin so no shell on the way re-parses it.
 func (e *Engine) runScript(ctx context.Context, envName, shell, script string) (string, int, error) {
 	var out sshx.OutputBuffer
-	code, err := e.Run(ctx, envName, desktopStepTimeout, ScriptCommand(shell), strings.NewReader(script), &out, &out)
+	code, err := e.run(ctx, envName, desktopStepTimeout, ScriptCommand(shell), strings.NewReader(script), &out, &out)
 	return out.String(), code, err
 }
 
@@ -202,7 +202,7 @@ func (e *Engine) execDesktop(ctx context.Context, r ExecRequest) (int, error) {
 		return -1, noConsoleSessionErr(r.Env)
 	}
 
-	id := NewMarkerID()
+	id := newMarkerID()
 	task := "trr-" + id
 	outFile := desktopOutDir + `\` + task + ".out"
 	action := desktopTaskAction(r.Command, outFile, id)

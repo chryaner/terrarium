@@ -26,9 +26,9 @@ const (
 	killTimeout = 60 * time.Second
 )
 
-// NewMarkerID is the per-command half of the marker. Random rather than the
+// newMarkerID is the per-command half of the marker. Random rather than the
 // env name: two execs against the same env must not kill each other.
-func NewMarkerID() string {
+func newMarkerID() string {
 	var b [6]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		// Only the uniqueness of one command's tag rides on this, and a clock
@@ -38,7 +38,7 @@ func NewMarkerID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// MarkCommand appends the marker to the command line a session carries, in
+// markCommand appends the marker to the command line a session carries, in
 // syntax the guest's own shell ignores. shell is the shell that reads the
 // line, not the shell the command was written for: the marker has to survive
 // that parser to reach the process table at all.
@@ -48,7 +48,7 @@ func NewMarkerID() string {
 // with a trailing comment leaves a shell holding the marker, and that shell is
 // the session's process group leader, so killing its group takes the command
 // with it.
-func MarkCommand(shell, command, id string) string {
+func markCommand(shell, command, id string) string {
 	marker := markerPrefix + id
 	switch shell {
 	case ShellCmd:
@@ -69,7 +69,7 @@ func MarkCommand(shell, command, id string) string {
 	}
 }
 
-// KillScript builds the script that finds everything carrying the marker and
+// killScript builds the script that finds everything carrying the marker and
 // kills it, and reports which shell has to read that script. It goes over
 // stdin rather than as a command line: it needs pipes and quotes that neither
 // cmd.exe nor a PowerShell command line would carry intact, and a cmd guest
@@ -78,7 +78,7 @@ func MarkCommand(shell, command, id string) string {
 // Neither script contains the marker as one string. A killer whose own command
 // line held it would match itself - and on Windows the shell sshd started for
 // it too, which is the session reading the answer.
-func KillScript(shell, id string) (script, scriptShell string) {
+func killScript(shell, id string) (script, scriptShell string) {
 	if shell == ShellPOSIX {
 		// TERM first, because a process given the chance to clean up usually
 		// takes it, then KILL for one that ignored it - and that is reported,
@@ -144,9 +144,9 @@ func (e *KilledError) Error() string {
 // the marker is bookkeeping, and showing it only makes the reader wonder what
 // they typed wrong.
 func (e *Engine) killMarked(envName, shell, id string, timeout time.Duration, command string) error {
-	script, scriptShell := KillScript(shell, id)
+	script, scriptShell := killScript(shell, id)
 	var out sshx.OutputBuffer
-	_, err := e.Run(context.Background(), envName, killTimeout,
+	_, err := e.run(context.Background(), envName, killTimeout,
 		ScriptCommand(scriptShell), strings.NewReader(script), &out, &out)
 	if err != nil {
 		return fmt.Errorf("command did not finish within %s: %s\nkilling it in the guest failed too: %v",

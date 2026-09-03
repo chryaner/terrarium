@@ -25,14 +25,14 @@ import (
 // PushTo copies a host file or directory into a guest over its SSH port.
 func PushTo(port int, user, password, keyPath, local, remote string, recursive, parents bool) error {
 	return withSFTP(port, user, password, keyPath, func(c *sftp.Client) error {
-		return Push(c, local, remote, recursive, parents)
+		return push(c, local, remote, recursive, parents)
 	})
 }
 
 // PullFrom copies a guest file or directory to the host over its SSH port.
 func PullFrom(port int, user, password, keyPath, remote, local string, recursive, parents bool) error {
 	return withSFTP(port, user, password, keyPath, func(c *sftp.Client) error {
-		return Pull(c, remote, local, recursive, parents)
+		return pull(c, remote, local, recursive, parents)
 	})
 }
 
@@ -50,10 +50,10 @@ func withSFTP(port int, user, password, keyPath string, fn func(*sftp.Client) er
 	return fn(c)
 }
 
-// Push copies local to remote inside the guest. Destination handling is
+// push copies local to remote inside the guest. Destination handling is
 // scp's: a remote path that is an existing directory receives the source
 // under its own name, anything else is the name to write.
-func Push(c *sftp.Client, local, remote string, recursive, parents bool) error {
+func push(c *sftp.Client, local, remote string, recursive, parents bool) error {
 	fi, err := os.Stat(local)
 	if err != nil {
 		return err
@@ -75,9 +75,9 @@ func Push(c *sftp.Client, local, remote string, recursive, parents bool) error {
 	return pushDir(c, local, dst)
 }
 
-// Pull copies remote out of the guest to local, with the same destination
-// rules as Push in the other direction.
-func Pull(c *sftp.Client, remote, local string, recursive, parents bool) error {
+// pull copies remote out of the guest to local, with the same destination
+// rules as push in the other direction.
+func pull(c *sftp.Client, remote, local string, recursive, parents bool) error {
 	// Cleaned so a trailing slash cannot leave every walked path prefixed with
 	// one, which would put the whole tree under an empty directory name.
 	remote = path.Clean(remote)

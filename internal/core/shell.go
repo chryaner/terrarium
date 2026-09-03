@@ -153,7 +153,7 @@ func (e *Engine) ShellFor(envName string) (string, error) {
 	// asked about - the record is what decides which one gets launched. Asking
 	// anyway would also recurse, since running the probe goes through here.
 	var ask func() (string, error)
-	if TransportOf(g) == TransportSSH {
+	if transportOf(g) == TransportSSH {
 		ask = func() (string, error) {
 			port, user, password, key, err := e.SSHTarget(envName)
 			if err != nil {

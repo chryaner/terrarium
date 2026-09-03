@@ -79,7 +79,7 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell, tran
 	if shell != "" && !ValidShell(shell) {
 		return nil, fmt.Errorf("unknown shell %q: one of %s", shell, strings.Join(Shells, ", "))
 	}
-	if transport != "" && !ValidTransport(transport) {
+	if transport != "" && !validTransport(transport) {
 		return nil, fmt.Errorf("unknown transport %q: one of %s", transport, strings.Join(Transports, ", "))
 	}
 	// Guest Additions have no key auth and no way to ask for one, so a record
@@ -331,7 +331,7 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 	if err := e.VB.StartHeadless(vmName); err != nil {
 		return err
 	}
-	if TransportOf(g) == TransportGuestControl {
+	if transportOf(g) == TransportGuestControl {
 		if err := e.waitGuestControl(env, g, progress); err != nil {
 			return err
 		}
@@ -434,7 +434,7 @@ func (e *Engine) Start(name string, progress func(string)) (*Env, error) {
 // console instead.
 func (e *Engine) waitReady(env *Env, progress func(string)) error {
 	g := e.St.Goldens[env.Golden]
-	if TransportOf(g) == TransportGuestControl {
+	if transportOf(g) == TransportGuestControl {
 		return e.waitGuestControl(env, g, progress)
 	}
 	if !g.hasCreds() {

@@ -85,7 +85,7 @@ func (e *Engine) runSetup(r recipe.Recipe, envName string, progress func(string)
 		var out sshx.OutputBuffer
 		// Through Run, so a base golden on the guestcontrol transport builds
 		// derived images the same way an SSH one does.
-		code, err := e.Run(context.Background(), envName, timeout, cmd, nil, &out, &out)
+		code, err := e.run(context.Background(), envName, timeout, cmd, nil, &out, &out)
 		if err != nil {
 			return fmt.Errorf("setup %d/%d (%s): %w", i+1, len(r.Setup), cmd, err)
 		}

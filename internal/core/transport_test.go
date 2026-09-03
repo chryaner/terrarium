@@ -24,17 +24,17 @@ func TestTransportOf(t *testing.T) {
 		{"a value nobody recognises is not guessed at", &Golden{Transport: "winrm"}, TransportSSH},
 		{"no golden at all", nil, TransportSSH},
 	} {
-		if got := TransportOf(c.g); got != c.want {
+		if got := transportOf(c.g); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
 	}
 	for _, bad := range []string{"winrm", "SSH", "guest-control", "telnet"} {
-		if ValidTransport(bad) {
+		if validTransport(bad) {
 			t.Errorf("--transport %q should be rejected", bad)
 		}
 	}
 	for _, ok := range Transports {
-		if !ValidTransport(ok) {
+		if !validTransport(ok) {
 			t.Errorf("--transport %q should be accepted", ok)
 		}
 	}
