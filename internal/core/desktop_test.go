@@ -18,17 +18,21 @@ func TestHasActiveConsoleSession(t *testing.T) {
 	rdpOnly := " SESSIONNAME       USERNAME                 ID  STATE   TYPE        DEVICE \r\n" +
 		" rdp-tcp#1         terrarium                 2  Active  rdpwd              \r\n"
 	for _, c := range []struct {
-		name string
-		out  string
-		want bool
+		name     string
+		out      string
+		want     bool
+		wantRead bool
 	}{
-		{"a user at the console", loggedIn, true},
-		{"the logon screen", loggedOut, false},
-		{"only a remote desktop session", rdpOnly, false},
-		{"nothing at all", "", false},
+		{"a user at the console", loggedIn, true, true},
+		{"the logon screen", loggedOut, false, true},
+		// No console line at all: this output says nothing either way, and
+		// saying so beats reporting a machine as logged out.
+		{"only a remote desktop session", rdpOnly, false, false},
+		{"nothing at all", "", false, false},
 	} {
-		if got := hasActiveConsoleSession(c.out); got != c.want {
-			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		got, read := hasActiveConsoleSession(c.out)
+		if got != c.want || read != c.wantRead {
+			t.Errorf("%s: got (%v, %v), want (%v, %v)", c.name, got, read, c.want, c.wantRead)
 		}
 	}
 }
@@ -47,23 +51,28 @@ func TestParseTaskQuery(t *testing.T) {
 		out      string
 		wantDone bool
 		wantCode int
+		wantRead bool
 	}{
-		{"finished cleanly", query("Ready", "0"), true, 0},
-		{"finished with a failure", query("Ready", "3"), true, 3},
-		{"still running", query("Running", "267009"), false, 0},
-		{"registered but not started yet", query("Ready", "267011"), false, 0},
-		{"an answer with neither field is not an answer", "ERROR: task not found", false, 0},
+		{"finished cleanly", query("Ready", "0"), true, 0, true},
+		{"finished with a failure", query("Ready", "3"), true, 3, true},
+		{"still running", query("Running", "267009"), false, 0, true},
+		{"registered but not started yet", query("Ready", "267011"), false, 0, true},
+		// Reported, rather than polled until the timeout and then blamed on
+		// the command: a localised Windows names these fields differently.
+		{"an answer with neither field is not an answer", "ERROR: task not found", false, 0, false},
 	} {
-		done, code := parseTaskQuery(c.out)
-		if done != c.wantDone || (done && code != c.wantCode) {
-			t.Errorf("%s: got done=%v code=%d, want done=%v code=%d", c.name, done, code, c.wantDone, c.wantCode)
+		done, code, read := parseTaskQuery(c.out)
+		if done != c.wantDone || (done && code != c.wantCode) || read != c.wantRead {
+			t.Errorf("%s: got done=%v code=%d read=%v, want done=%v code=%d read=%v",
+				c.name, done, code, read, c.wantDone, c.wantCode, c.wantRead)
 		}
 	}
 }
 
 // The task action is the only part of --desktop that runs the caller's
-// command, so it has to redirect both streams to somewhere readable and carry
-// the marker that makes a timeout killable.
+// command, so it has to redirect both streams to somewhere readable, carry the
+// marker that makes a timeout killable, and still exit with what the command
+// exited with.
 func TestDesktopTaskAction(t *testing.T) {
 	got := desktopTaskAction("notepad", `C:\Windows\Temp\trr-1.out`, "abc123")
 	want := `cmd /c set TRR_MARK=trr:abc123 & ( notepad ) > C:\Windows\Temp\trr-1.out 2>&1`
@@ -106,6 +115,20 @@ func TestDesktopScriptsQuote(t *testing.T) {
 	}
 }
 
+// PowerShell exits 0 whatever the native commands in a script did, so without
+// this a refused schtasks looks like a task that was registered and the caller
+// waits out the whole timeout for a command that never ran.
+func TestDesktopScriptsReportSchtasksFailure(t *testing.T) {
+	for name, script := range map[string]string{
+		"create": desktopCreateScript("trr-1", "cmd /c echo x"),
+		"query":  desktopQueryScript("trr-1"),
+	} {
+		if !strings.Contains(script, "exit $LASTEXITCODE") {
+			t.Errorf("the %s script swallows schtasks' exit code:\n%s", name, script)
+		}
+	}
+}
+
 // The error a user hits on an older golden is the whole feature for them, so
 // it has to name the way out rather than only the problem.
 func TestNoConsoleSessionErrSaysWhatToDo(t *testing.T) {
@@ -113,6 +136,17 @@ func TestNoConsoleSessionErrSaysWhatToDo(t *testing.T) {
 	for _, want := range []string{"screenshot w1", "type w1", "keys w1"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error does not say to %q: %s", want, msg)
+		}
+	}
+}
+
+// Output terrarium cannot parse has to be shown, not guessed at: the reader
+// needs to see that it was a language problem rather than a broken command.
+func TestUnreadableErrShowsTheOutput(t *testing.T) {
+	msg := unreadableErr("schtasks /Query", "Status:                Wird ausgefuehrt").Error()
+	for _, want := range []string{"schtasks /Query", "Wird ausgefuehrt", "non-English"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error is missing %q: %s", want, msg)
 		}
 	}
 }

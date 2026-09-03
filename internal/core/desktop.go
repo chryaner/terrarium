@@ -40,20 +40,27 @@ const (
 // hasActiveConsoleSession reads `query session` output. Only the console
 // session counts: an /IT task runs where the user is interactively logged in,
 // and a disconnected session has no screen behind it for a screenshot to show.
-func hasActiveConsoleSession(out string) bool {
+//
+// read is false when there was no console line at all, which is what a
+// localised or changed output looks like from here. The STATE word itself is
+// localised on a non-English Windows, so a console line that is logged on can
+// still read as logged out - the error that follows says how to log one in,
+// which is the right thing to try either way.
+func hasActiveConsoleSession(out string) (active, read bool) {
 	for _, line := range strings.Split(out, "\n") {
 		// The current session is marked with a leading >.
 		fields := strings.Fields(strings.TrimPrefix(strings.TrimSpace(line), ">"))
 		if len(fields) == 0 || !strings.EqualFold(fields[0], "console") {
 			continue
 		}
+		read = true
 		for _, f := range fields[1:] {
 			if strings.EqualFold(f, "Active") {
-				return true
+				return true, true
 			}
 		}
 	}
-	return false
+	return false, read
 }
 
 var (
@@ -63,25 +70,37 @@ var (
 
 // parseTaskQuery reads `schtasks /Query /FO LIST /V`. done reports that the
 // command has finished and code is its exit code; until then code means
-// nothing. A query that says neither is not an answer, so it is not treated
-// as one - polling carries on.
-func parseTaskQuery(out string) (done bool, code int) {
+// nothing. read is false when neither field was there - a localised Windows,
+// or a task that is gone - and the caller says so rather than polling until
+// the timeout and then claiming the command is still running.
+func parseTaskQuery(out string) (done bool, code int, read bool) {
 	status := taskStatusRe.FindStringSubmatch(out)
 	result := taskResultRe.FindStringSubmatch(out)
 	if status == nil || result == nil {
-		return false, 0
+		return false, 0, false
 	}
 	if strings.EqualFold(status[1], "Running") {
-		return false, 0
+		return false, 0, true
 	}
 	n, err := strconv.Atoi(result[1])
 	if err != nil {
-		return false, 0
+		return false, 0, false
 	}
 	if n == schedTaskRunning || n == schedTaskHasNotRun {
-		return false, 0
+		return false, 0, true
 	}
-	return true, n
+	return true, n, true
+}
+
+// unreadableErr reports guest output terrarium cannot make sense of, with
+// enough of it to see why. Everything --desktop reads is an English Windows
+// command's output; on any other one this is the honest answer.
+func unreadableErr(what, out string) error {
+	out = strings.TrimSpace(out)
+	if len(out) > 800 {
+		out = out[len(out)-800:]
+	}
+	return fmt.Errorf("could not read the guest's %s output - a non-English Windows reports these fields in its own language, and --desktop cannot drive it:\n%s", what, out)
 }
 
 // psQuote spells one string as a PowerShell single-quoted literal, where
@@ -95,14 +114,10 @@ func psQuote(s string) string {
 // the marker that makes it killable. cmd.exe rather than the guest's own
 // shell because a task action is a command line, not a session.
 //
-// The marker goes inside the cmd /c argument, not around it: a task action is
-// a program plus arguments, and `set` is not a program.
-//
 // The command is parenthesised because a redirect binds to one command:
-// `a & b > f` sends only b's output to the file, and `a | b > f` only b's, so
-// anything compound would lose most of what it printed - and the file is all
-// the caller gets back. A block redirects as a whole, and still exits with
-// what its last command exited with.
+// `a & b > f` sends only b's output to the file, and `a | b > f` only b's,
+// so anything compound would lose most of what it printed. A block redirects
+// as a whole, and still exits with what its last command exited with.
 func desktopTaskAction(command, outFile, id string) string {
 	return "cmd /c " + MarkCommand(ShellCmd, "( "+command+" ) > "+outFile+" 2>&1", id)
 }
@@ -111,14 +126,21 @@ func desktopTaskAction(command, outFile, id string) string {
 // interactive session, /RL HIGHEST keeps the elevation an SSH session already
 // had, and /SC ONCE with a start time in the past never fires by itself -
 // schtasks /Run is what starts it.
+// exitWithLastCode is what makes a schtasks failure visible. PowerShell exits
+// 0 after running a script whatever the native commands in it did, so without
+// this a refused /Create looks like a task that was registered and the caller
+// waits out the whole timeout for a command that never ran.
+const exitWithLastCode = "exit $LASTEXITCODE\n"
+
 func desktopCreateScript(task, action string) string {
 	return "schtasks /Create /TN " + psQuote(task) + " /TR " + psQuote(action) +
 		" /SC ONCE /ST 00:00 /IT /RL HIGHEST /F\n" +
-		"schtasks /Run /TN " + psQuote(task) + "\n"
+		"schtasks /Run /TN " + psQuote(task) + "\n" +
+		exitWithLastCode
 }
 
 func desktopQueryScript(task string) string {
-	return "schtasks /Query /TN " + psQuote(task) + " /FO LIST /V\n"
+	return "schtasks /Query /TN " + psQuote(task) + " /FO LIST /V\n" + exitWithLastCode
 }
 
 func desktopEndScript(task string) string {
@@ -165,11 +187,18 @@ func (e *Engine) execDesktop(ctx context.Context, r ExecRequest) (int, error) {
 	}
 	// Every step below is a PowerShell script over stdin: a cmd guest has
 	// powershell.exe too, and nothing else quotes schtasks' arguments safely.
+	//
+	// query session's own exit code is 1 even when it worked, so only its
+	// output is read.
 	probe, _, err := e.runScript(ctx, r.Env, ShellPowerShell, "query session\n")
 	if err != nil {
 		return -1, err
 	}
-	if !hasActiveConsoleSession(probe) {
+	active, read := hasActiveConsoleSession(probe)
+	if !read {
+		return -1, unreadableErr("query session", probe)
+	}
+	if !active {
 		return -1, noConsoleSessionErr(r.Env)
 	}
 
@@ -177,17 +206,28 @@ func (e *Engine) execDesktop(ctx context.Context, r ExecRequest) (int, error) {
 	task := "trr-" + id
 	outFile := desktopOutDir + `\` + task + ".out"
 	action := desktopTaskAction(r.Command, outFile, id)
-	if out, _, err := e.runScript(ctx, r.Env, ShellPowerShell, desktopCreateScript(task, action)); err != nil {
+	out, code, err := e.runScript(ctx, r.Env, ShellPowerShell, desktopCreateScript(task, action))
+	if err != nil {
 		return -1, fmt.Errorf("registering the desktop task failed: %w\n%s", err, strings.TrimSpace(out))
 	}
+	if code != 0 {
+		// schtasks refuses an action longer than it will store, a task name
+		// that clashes, a machine with no task scheduler running. Silently,
+		// as far as PowerShell is concerned.
+		return -1, fmt.Errorf("schtasks exited %d registering the desktop task, so the command never ran:\n%s",
+			code, strings.TrimSpace(out))
+	}
+	// The task exists from here, so it goes whatever happens next - including
+	// the paths that return an error, which is where it used to be left behind
+	// with its output file.
+	defer e.runScript(context.Background(), r.Env, ShellPowerShell, desktopCleanupScript(task, outFile))
 
-	code, err := e.waitDesktopTask(ctx, r, task)
+	code, err = e.waitDesktopTask(ctx, r, task)
 	if err != nil {
 		return -1, err
 	}
-	// Read before cleaning up: the file is the command's whole output.
+	// Read before the deferred cleanup: the file is the command's whole output.
 	out, _, readErr := e.runScript(ctx, r.Env, ShellPowerShell, desktopReadScript(outFile))
-	e.runScript(ctx, r.Env, ShellPowerShell, desktopCleanupScript(task, outFile))
 	if readErr != nil {
 		return code, readErr
 	}
@@ -202,12 +242,20 @@ func (e *Engine) execDesktop(ctx context.Context, r ExecRequest) (int, error) {
 func (e *Engine) waitDesktopTask(ctx context.Context, r ExecRequest, task string) (int, error) {
 	deadline := time.Now().Add(r.Timeout)
 	for {
-		out, _, err := e.runScript(ctx, r.Env, ShellPowerShell, desktopQueryScript(task))
+		out, code, err := e.runScript(ctx, r.Env, ShellPowerShell, desktopQueryScript(task))
 		if err != nil {
 			return -1, err
 		}
-		if done, code := parseTaskQuery(out); done {
-			return code, nil
+		if code != 0 {
+			return -1, fmt.Errorf("schtasks exited %d reading the desktop task's status:\n%s",
+				code, strings.TrimSpace(out))
+		}
+		done, taskCode, read := parseTaskQuery(out)
+		if !read {
+			return -1, unreadableErr("schtasks /Query", out)
+		}
+		if done {
+			return taskCode, nil
 		}
 		if !time.Now().Before(deadline) {
 			return -1, e.desktopTimeout(r, task)
@@ -224,11 +272,13 @@ func (e *Engine) waitDesktopTask(ctx context.Context, r ExecRequest, task string
 // says how to stop it by hand: the command is still on the guest's screen,
 // which is sometimes exactly what the caller wants to look at.
 func (e *Engine) desktopTimeout(r ExecRequest, task string) error {
-	outFile := desktopOutDir + `\` + task + ".out"
 	if !r.KillOnTimeout {
+		// The task registration goes with the caller's return - the process it
+		// started does not, and it is still on the screen, which is often what
+		// the caller wanted to see.
 		return fmt.Errorf("command did not finish within %s and is still running on the guest's desktop: %s\n"+
-			"look at it with `terrarium screenshot %s`, stop it with `terrarium exec %s -- schtasks /End /TN %s`",
-			r.Timeout, r.Command, r.Env, r.Env, task)
+			"look at it with `terrarium screenshot %s`; --kill-on-timeout would have killed it and its children",
+			r.Timeout, r.Command, r.Env)
 	}
 	ctx := context.Background()
 	// The marker kill comes first, and it is the one that matters: /End stops
@@ -238,6 +288,5 @@ func (e *Engine) desktopTimeout(r ExecRequest, task string) error {
 	id := strings.TrimPrefix(task, "trr-")
 	err := e.killMarked(r.Env, ShellCmd, id, r.Timeout, r.Command)
 	e.runScript(ctx, r.Env, ShellPowerShell, desktopEndScript(task))
-	e.runScript(ctx, r.Env, ShellPowerShell, desktopCleanupScript(task, outFile))
 	return err
 }
