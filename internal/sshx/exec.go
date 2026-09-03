@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -80,45 +79,9 @@ func Exec(port int, user, password, keyPath, command string) (int, error) {
 }
 
 // ExecStreams is Exec with the guest's output redirected, so callers that
-// need to inspect it (first-boot orchestration) can. Uses the Go SSH client
-// so password auth works non-interactively (ssh.exe always prompts). Host key
-// checking is off: fork host keys rotate on every clone.
+// need to inspect it (first-boot orchestration) can.
 func ExecStreams(port int, user, password, keyPath, command string, stdout, stderr io.Writer) (int, error) {
-	var auth []ssh.AuthMethod
-	if keyPath != "" {
-		data, err := os.ReadFile(keyPath)
-		if err != nil {
-			return -1, err
-		}
-		signer, err := ssh.ParsePrivateKey(data)
-		if err != nil {
-			return -1, fmt.Errorf("parsing key %s: %w", keyPath, err)
-		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	}
-	if password != "" {
-		auth = append(auth,
-			ssh.Password(password),
-			// some sshds only offer keyboard-interactive for passwords
-			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-				answers := make([]string, len(questions))
-				for i := range answers {
-					answers[i] = password
-				}
-				return answers, nil
-			}))
-	}
-	if len(auth) == 0 {
-		return -1, fmt.Errorf("no SSH credentials: adopt the golden with --user and --password or --key")
-	}
-
-	cfg := &ssh.ClientConfig{
-		User:            user,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
-	client, err := ssh.Dial("tcp", "127.0.0.1:"+strconv.Itoa(port), cfg)
+	client, err := Dial(port, user, password, keyPath)
 	if err != nil {
 		return -1, err
 	}
