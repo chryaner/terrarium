@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -183,14 +184,28 @@ func (e *Engine) removeGuestFile(vmName string, creds vbox.GuestCreds, shell, gu
 	e.VB.GuestRun(context.Background(), vmName, creds, 30*time.Second, exe, append(args, rm), nil, io.Discard, io.Discard)
 }
 
-// copyGuestControl is Push/Pull over Guest Additions.
-func (e *Engine) copyGuestControl(envName, local, remote string, push, recursive bool) error {
+// copyGuestControl is Push/Pull over Guest Additions. parents is honoured on
+// both sides: copyto refuses a destination whose directory does not exist, and
+// the host end of a pull is ours to create.
+func (e *Engine) copyGuestControl(envName, local, remote string, push, recursive, parents bool) error {
 	vmName, creds, err := e.guestTarget(envName)
 	if err != nil {
 		return err
 	}
 	if push {
+		if parents {
+			if dir := path.Dir(remote); dir != "." && dir != "/" {
+				if err := e.VB.GuestMkdirAll(vmName, creds, dir); err != nil {
+					return err
+				}
+			}
+		}
 		return e.VB.GuestCopyTo(vmName, creds, local, remote, recursive)
+	}
+	if parents {
+		if err := os.MkdirAll(filepath.Dir(local), 0o755); err != nil {
+			return err
+		}
 	}
 	return e.VB.GuestCopyFrom(vmName, creds, remote, local, recursive)
 }

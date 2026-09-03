@@ -144,6 +144,19 @@ func (c *Client) GuestRun(ctx context.Context, vm string, creds GuestCreds, time
 // not still has the process ended for it.
 const guestKillGrace = 60 * time.Second
 
+// GuestMkdirAll creates a directory in the guest, parents included. copyto
+// will not do it: it fails with "path to guest file not found" rather than
+// creating what is missing, verified against VirtualBox 7.2.
+func (c *Client) GuestMkdirAll(vm string, creds GuestCreds, guestDir string) error {
+	out, err := c.runRaw(DefaultTimeout, "guestcontrol", vm, "mkdir",
+		"--username", creds.User, "--password", creds.Password,
+		"--parents", guestWindowsPath(guestDir))
+	if err != nil {
+		return fmt.Errorf("VBoxManage guestcontrol mkdir on %s: %s", vm, redactedTail(out))
+	}
+	return nil
+}
+
 // GuestCopyTo copies one host file into the guest. The positional form names
 // the destination file exactly, which --target-directory cannot.
 func (c *Client) GuestCopyTo(vm string, creds GuestCreds, hostPath, guestPath string, recursive bool) error {

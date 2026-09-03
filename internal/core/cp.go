@@ -81,9 +81,7 @@ func (e *Engine) Push(envName, local, remote string, recursive, parents bool) er
 		return err
 	}
 	if transport == TransportGuestControl {
-		// Guest Additions create the destination's parents themselves, so
-		// there is no -p to honour and nothing to do differently without it.
-		return e.copyGuestControl(envName, local, remote, true, recursive)
+		return e.copyGuestControl(envName, local, remote, true, recursive, parents)
 	}
 	port, user, password, key, err := e.SSHTarget(envName)
 	if err != nil {
@@ -99,7 +97,7 @@ func (e *Engine) Pull(envName, remote, local string, recursive, parents bool) er
 		return err
 	}
 	if transport == TransportGuestControl {
-		return e.copyGuestControl(envName, local, remote, false, recursive)
+		return e.copyGuestControl(envName, local, remote, false, recursive, parents)
 	}
 	port, user, password, key, err := e.SSHTarget(envName)
 	if err != nil {
