@@ -5,16 +5,13 @@
 package seed
 
 import (
-	"crypto/ed25519"
-	"crypto/rand"
-	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/chryaner/terrarium/internal/sshx"
 	"github.com/kdomanski/iso9660"
-	"golang.org/x/crypto/ssh"
 )
 
 // User is the account cloud-init creates in the guest.
@@ -54,7 +51,9 @@ func Generate(baseDir, image string, packages []string) (keyPath, isoPath string
 		return "", "", err
 	}
 	keyPath = filepath.Join(dir, keyFile)
-	pubKey, err := ensureKey(keyPath)
+	// The generator is shared with the Windows install path, which installs
+	// the same kind of key by a different route.
+	pubKey, err := sshx.EnsureKey(keyPath, User)
 	if err != nil {
 		return "", "", err
 	}
@@ -63,48 +62,6 @@ func Generate(baseDir, image string, packages []string) (keyPath, isoPath string
 		return "", "", err
 	}
 	return keyPath, isoPath, nil
-}
-
-// ensureKey returns the authorized_keys line for the key at path, generating
-// the pair first if it is not there yet.
-func ensureKey(path string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		signer, err := ssh.ParsePrivateKey(data)
-		if err != nil {
-			return "", fmt.Errorf("parsing existing key %s: %w", path, err)
-		}
-		return authorizedKey(signer.PublicKey()), nil
-	}
-	if !os.IsNotExist(err) {
-		return "", err
-	}
-
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		return "", err
-	}
-	block, err := ssh.MarshalPrivateKey(priv, User)
-	if err != nil {
-		return "", err
-	}
-	sshPub, err := ssh.NewPublicKey(pub)
-	if err != nil {
-		return "", err
-	}
-	// 0600 is advisory on Windows; the file lands in LOCALAPPDATA either way.
-	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
-		return "", err
-	}
-	line := authorizedKey(sshPub)
-	if err := os.WriteFile(path+".pub", []byte(line+"\n"), 0o644); err != nil {
-		return "", err
-	}
-	return line, nil
-}
-
-func authorizedKey(pub ssh.PublicKey) string {
-	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub)))
 }
 
 // shareMount is the guest half of `terrarium up`'s shared folder. The vboxsf
