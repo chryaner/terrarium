@@ -79,13 +79,13 @@ func resolveISOOSType(image, fromRecipe, detected string, progress func(string))
 	case fromRecipe == "" && detected == "":
 		return "", fmt.Errorf("recipe %s: VirtualBox cannot tell what this ISO installs.\nadd the guest type to the recipe, e.g. `ostype: Windows10_64` (`VBoxManage list ostypes` lists them); copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ to override a shipped one", image)
 	case fromRecipe == "":
-		progress("the ISO installs " + detected + " (" + archOf(detected) + ")")
+		progress("the ISO installs " + detected + " (" + ArchOf(detected) + ")")
 		return detected, nil
 	case detected == "":
 		return fromRecipe, nil
-	case archOf(fromRecipe) != archOf(detected):
+	case ArchOf(fromRecipe) != ArchOf(detected):
 		progress(fmt.Sprintf("recipe says %s (%s) but the ISO is %s: using %s",
-			fromRecipe, archOf(fromRecipe), archOf(detected), detected))
+			fromRecipe, ArchOf(fromRecipe), ArchOf(detected), detected))
 		return detected, nil
 	default:
 		return fromRecipe, nil

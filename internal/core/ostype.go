@@ -5,12 +5,12 @@ import (
 	"strings"
 )
 
-// archOf reads the CPU architecture out of a VirtualBox guest type id. The id
+// ArchOf reads the CPU architecture out of a VirtualBox guest type id. The id
 // carries it as a suffix - Windows10_64, Debian_arm64, plain Windows10 for
 // 32-bit - and it is the one fact about a golden that decides whether an
 // installer or a binary will run in it at all. An empty type has no answer to
 // give; callers print that as unknown rather than guessing x86.
-func archOf(ostype string) string {
+func ArchOf(ostype string) string {
 	switch {
 	case ostype == "":
 		return ""

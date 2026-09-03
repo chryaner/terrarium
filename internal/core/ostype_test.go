@@ -18,8 +18,8 @@ func TestArchOf(t *testing.T) {
 		"": "",
 	}
 	for ostype, want := range cases {
-		if got := archOf(ostype); got != want {
-			t.Errorf("archOf(%q) = %q, want %q", ostype, got, want)
+		if got := ArchOf(ostype); got != want {
+			t.Errorf("ArchOf(%q) = %q, want %q", ostype, got, want)
 		}
 	}
 }

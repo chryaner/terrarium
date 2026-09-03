@@ -79,7 +79,7 @@ func (e *Engine) Info(name string) (Info, error) {
 	if ostype, err := e.OSTypeOf(name); err == nil {
 		in.OSType = ostype
 	}
-	in.Arch = archOf(in.OSType)
+	in.Arch = ArchOf(in.OSType)
 	if cpus, memMB, err := e.VB.CPUMem(in.VMName); err == nil {
 		in.CPUs, in.MemoryMB = cpus, memMB
 	}
