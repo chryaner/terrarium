@@ -49,10 +49,11 @@ func TestToolsAdvertised(t *testing.T) {
 	tools := listTools(t)
 
 	want := []string{
-		"doctor", "env_click", "env_down", "env_exec", "env_fork", "env_gc",
-		"env_keys", "env_list", "env_promote", "env_restore", "env_revert",
-		"env_rm", "env_screenshot", "env_scroll", "env_snapshot", "env_start",
-		"env_type", "golden_get", "recipe_list",
+		"doctor", "env_click", "env_create", "env_down", "env_exec", "env_fork",
+		"env_gc", "env_keys", "env_list", "env_promote", "env_pull", "env_push",
+		"env_restore", "env_revert", "env_rm", "env_screenshot", "env_scroll",
+		"env_snapshot", "env_start", "env_type", "golden_adopt", "golden_get",
+		"golden_import", "recipe_list",
 	}
 	for _, name := range want {
 		if tools[name] == nil {
@@ -74,6 +75,18 @@ func TestServerInstructions(t *testing.T) {
 	for _, want := range []string{"doctor", "ok:false", "rm --golden"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("instructions should mention %q:\n%s", want, got)
+		}
+	}
+}
+
+// An agent that reads adopt as needing working credentials up front will not
+// take on a machine whose login nobody knows. The instructions are the only
+// place it reads before choosing a first call.
+func TestInstructionsCoverUnknownCredentials(t *testing.T) {
+	got := connect(t).InitializeResult().Instructions
+	for _, want := range []string{"golden_import", "golden_adopt", "env_screenshot", "env_type"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the unknown-credentials workflow should name %q:\n%s", want, got)
 		}
 	}
 }
@@ -130,9 +143,19 @@ func TestToolSchemas(t *testing.T) {
 		{"recipe_list", nil, nil},
 		{"doctor", nil, nil},
 		{"golden_get", []string{"image"}, []string{"cpus", "memory_mb"}},
+		{"env_create", []string{"name", "iso_path", "ostype"}, []string{"disk_gb", "cpus", "memory_mb"}},
+		{"env_push", []string{"name", "local_path", "guest_path"}, []string{"recursive"}},
+		{"env_pull", []string{"name", "guest_path", "local_path"}, []string{"recursive"}},
+		// image, not name: name is an environment everywhere in this surface.
+		{"golden_import", []string{"ova_path", "image"}, []string{"user", "password", "key"}},
+		// Only the VM is required: adopting without credentials is the first
+		// half of working out an unknown login, not a mistake.
+		{"golden_adopt", []string{"vm"}, []string{"image", "snapshot", "user", "password", "key", "take_snapshot"}},
 		{"env_fork", []string{"golden", "name"}, []string{"cpus", "memory_mb", "share_host_path", "ttl_seconds"}},
 		{"env_start", []string{"name"}, nil},
-		{"env_exec", []string{"name", "command"}, []string{"timeout_sec"}},
+		// command is optional because script is the alternative to it;
+		// execRequest is what enforces exactly one of the two.
+		{"env_exec", []string{"name"}, []string{"command", "script", "shell", "timeout_sec"}},
 		{"env_down", []string{"name"}, nil},
 		{"env_revert", []string{"name"}, nil},
 		{"env_rm", []string{"name"}, nil},

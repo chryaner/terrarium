@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"image/png"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/chryaner/terrarium/internal/core"
@@ -28,6 +30,22 @@ type goldenInfo struct {
 	Snapshot string `json:"snapshot"`
 	SSHUser  string `json:"ssh_user,omitempty"`
 	Owned    bool   `json:"owned"`
+	// OSType and Arch answer "what is this thing" before a fork rather than
+	// after something fails inside the guest.
+	OSType string `json:"ostype,omitempty"`
+	Arch   string `json:"arch,omitempty"`
+}
+
+func describeGolden(name string, g *core.Golden) goldenInfo {
+	return goldenInfo{
+		Name:     name,
+		VMName:   g.VMName,
+		Snapshot: g.Snapshot,
+		SSHUser:  g.SSHUser,
+		Owned:    g.Owned,
+		OSType:   g.OSType,
+		Arch:     core.ArchOf(g.OSType),
+	}
 }
 
 type envInfo struct {
@@ -44,6 +62,12 @@ type envInfo struct {
 
 type nameInput struct {
 	Name string `json:"name" jsonschema:"name of the environment"`
+}
+
+// screenshotInput is nameInput with a wider contract: reading a screen is
+// read-only, so it takes goldens and unmanaged VMs too.
+type screenshotInput struct {
+	Name string `json:"name" jsonschema:"name of the environment, golden image, or VirtualBox VM"`
 }
 
 // --- doctor ---
@@ -115,16 +139,15 @@ func envList(ctx context.Context, _ *mcp.CallToolRequest, _ listInput) (*mcp.Cal
 		}
 	}
 
+	// The guest type is how an agent tells a 32-bit image from a 64-bit one
+	// before forking it, so fill in the records that predate the field.
+	if err := e.FillOSTypes(); err != nil {
+		return nil, listOutput{}, err
+	}
+
 	out := listOutput{Goldens: []goldenInfo{}, Envs: []envInfo{}}
 	for _, name := range sortedKeys(e.St.Goldens) {
-		g := e.St.Goldens[name]
-		out.Goldens = append(out.Goldens, goldenInfo{
-			Name:     name,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		})
+		out.Goldens = append(out.Goldens, describeGolden(name, e.St.Goldens[name]))
 	}
 	for _, name := range sortedKeys(e.St.Envs) {
 		out.Envs = append(out.Envs, describeEnv(name, e.St.Envs[name], running))
@@ -181,16 +204,73 @@ func goldenGet(ctx context.Context, _ *mcp.CallToolRequest, in goldenGetInput) (
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	return nil, goldenGetOutput{
-		Golden: goldenInfo{
-			Name:     in.Image,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		},
-		Log: log,
-	}, nil
+	return nil, goldenGetOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
+}
+
+// --- golden_import ---
+
+// image, not name, throughout the golden_ tools: every tool here uses name for
+// an environment and image for a golden, and one word has to mean one thing.
+type goldenImportInput struct {
+	OVAPath  string `json:"ova_path" jsonschema:"path to the .ova or .ovf appliance file on this machine"`
+	Image    string `json:"image" jsonschema:"name for the new golden image: letters, digits, dots, dashes"`
+	User     string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
+	Password string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
+	Key      string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
+}
+
+func goldenImport(ctx context.Context, _ *mcp.CallToolRequest, in goldenImportInput) (*mcp.CallToolResult, goldenGetOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	var log []string
+	// Hardware is left as the appliance shipped it: nothing here knows what
+	// the machine inside needs, and a vendor image is usually sized already.
+	g, err := e.ImportOVA(in.OVAPath, in.Image, in.User, in.Password, in.Key, 0, 0, progressTo(&log))
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	return nil, goldenGetOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
+}
+
+// --- golden_adopt ---
+
+type goldenAdoptInput struct {
+	VM           string `json:"vm" jsonschema:"name of the existing VirtualBox VM, as shown by env_list or terrarium ls"`
+	Image        string `json:"image,omitempty" jsonschema:"golden image name to record it under (default: the VM name)"`
+	Snapshot     string `json:"snapshot,omitempty" jsonschema:"snapshot to fork from (default terrarium-base)"`
+	User         string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
+	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
+	Key          string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
+	Shell        string `json:"shell,omitempty" jsonschema:"what an SSH session lands in: posix, cmd or powershell; Windows guests are probed on first exec when unset"`
+	Transport    string `json:"transport,omitempty" jsonschema:"how to reach the guest: ssh (default), or guestcontrol for a Windows with no SSH server, which talks through VirtualBox Guest Additions and needs user and password"`
+	TakeSnapshot bool   `json:"take_snapshot,omitempty" jsonschema:"create the snapshot if the VM does not have it yet; this modifies the user's VM"`
+}
+
+func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInput) (*mcp.CallToolResult, goldenGetOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	g, err := e.Adopt(in.VM, core.AdoptOpts{
+		Image:        in.Image,
+		Snapshot:     in.Snapshot,
+		User:         in.User,
+		Password:     in.Password,
+		Key:          in.Key,
+		Shell:        in.Shell,
+		Transport:    in.Transport,
+		TakeSnapshot: in.TakeSnapshot,
+	})
+	if err != nil {
+		return nil, goldenGetOutput{}, err
+	}
+	image := in.Image
+	if image == "" {
+		image = in.VM
+	}
+	return nil, goldenGetOutput{Golden: describeGolden(image, g)}, nil
 }
 
 // --- env_fork ---
@@ -231,6 +311,85 @@ func envFork(ctx context.Context, _ *mcp.CallToolRequest, in envForkInput) (*mcp
 	return nil, envOutput{Env: describeEnv(in.Name, env, map[string]bool{env.VMName: true}), Log: log}, nil
 }
 
+// --- env_create ---
+
+type envCreateInput struct {
+	Name     string `json:"name" jsonschema:"name for the new environment: letters, digits and dashes"`
+	ISOPath  string `json:"iso_path" jsonschema:"absolute path on THIS host to the installation ISO"`
+	OSType   string `json:"ostype" jsonschema:"VirtualBox guest type, for example Linux_64, OpenSUSE_64 or Windows10_64"`
+	DiskGB   int    `json:"disk_gb,omitempty" jsonschema:"size of the blank disk in GB, default 32; it is dynamic and grows on demand"`
+	CPUs     int    `json:"cpus,omitempty" jsonschema:"CPUs, default 2"`
+	MemoryMB int    `json:"memory_mb,omitempty" jsonschema:"memory in MB, default 2048"`
+}
+
+func envCreate(ctx context.Context, _ *mcp.CallToolRequest, in envCreateInput) (*mcp.CallToolResult, envOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, envOutput{}, err
+	}
+	// Omitted hardware fields arrive as zero and Create fills in the defaults.
+	o := core.CreateOpts{
+		ISO:    in.ISOPath,
+		OSType: in.OSType,
+		DiskGB: in.DiskGB,
+		CPUs:   in.CPUs,
+		MemMB:  in.MemoryMB,
+	}
+	var log []string
+	// Create rolls a failure back itself, so there is nothing for env_rm to do.
+	env, err := e.Create(in.Name, o, progressTo(&log))
+	if err != nil {
+		return nil, envOutput{}, err
+	}
+	return nil, envOutput{Env: describeEnv(in.Name, env, map[string]bool{env.VMName: true}), Log: log}, nil
+}
+
+// --- env_push / env_pull ---
+
+type envPushInput struct {
+	Name      string `json:"name" jsonschema:"name of the environment to copy into"`
+	LocalPath string `json:"local_path" jsonschema:"path on THIS host to copy from; the server runs on the host, not in the guest"`
+	GuestPath string `json:"guest_path" jsonschema:"path inside the guest to copy to, forward slashes even on Windows guests (C:/Users/terrarium/x)"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"copy a directory and everything under it"`
+}
+
+type envPullInput struct {
+	Name      string `json:"name" jsonschema:"name of the environment to copy out of"`
+	GuestPath string `json:"guest_path" jsonschema:"path inside the guest to copy from, forward slashes even on Windows guests (C:/Users/terrarium/x)"`
+	LocalPath string `json:"local_path" jsonschema:"path on THIS host to copy to; the server runs on the host, not in the guest"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"copy a directory and everything under it"`
+}
+
+type copyOutput struct {
+	Name      string `json:"name"`
+	LocalPath string `json:"local_path"`
+	GuestPath string `json:"guest_path"`
+}
+
+func envPush(ctx context.Context, _ *mcp.CallToolRequest, in envPushInput) (*mcp.CallToolResult, copyOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, copyOutput{}, err
+	}
+	// Parents are created: an agent has no cheap way to check first, and the
+	// CLI's -p exists to stop a typo scattering directories interactively.
+	if err := e.Push(in.Name, in.LocalPath, in.GuestPath, in.Recursive, true); err != nil {
+		return nil, copyOutput{}, err
+	}
+	return nil, copyOutput{Name: in.Name, LocalPath: in.LocalPath, GuestPath: in.GuestPath}, nil
+}
+
+func envPull(ctx context.Context, _ *mcp.CallToolRequest, in envPullInput) (*mcp.CallToolResult, copyOutput, error) {
+	e, err := engine()
+	if err != nil {
+		return nil, copyOutput{}, err
+	}
+	if err := e.Pull(in.Name, in.GuestPath, in.LocalPath, in.Recursive, true); err != nil {
+		return nil, copyOutput{}, err
+	}
+	return nil, copyOutput{Name: in.Name, LocalPath: in.LocalPath, GuestPath: in.GuestPath}, nil
+}
+
 // --- env_promote ---
 
 type envPromoteInput struct {
@@ -253,16 +412,7 @@ func envPromote(ctx context.Context, _ *mcp.CallToolRequest, in envPromoteInput)
 	if err != nil {
 		return nil, envPromoteOutput{}, err
 	}
-	return nil, envPromoteOutput{
-		Golden: goldenInfo{
-			Name:     in.Image,
-			VMName:   g.VMName,
-			Snapshot: g.Snapshot,
-			SSHUser:  g.SSHUser,
-			Owned:    g.Owned,
-		},
-		Log: log,
-	}, nil
+	return nil, envPromoteOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
 }
 
 // --- env_gc ---
@@ -315,8 +465,11 @@ func envStart(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.C
 
 type envExecInput struct {
 	Name       string `json:"name" jsonschema:"name of the environment to run in"`
-	Command    string `json:"command" jsonschema:"shell command to run in the guest"`
+	Command    string `json:"command,omitempty" jsonschema:"shell command to run in the guest; omit when passing script"`
+	Script     string `json:"script,omitempty" jsonschema:"multi-line script to run instead of command; it reaches the shell on stdin so nothing in it is quoted or split"`
+	Shell      string `json:"shell,omitempty" jsonschema:"run under this shell instead of the guest's own: powershell, cmd or sh"`
 	TimeoutSec int    `json:"timeout_sec,omitempty" jsonschema:"seconds to wait before giving up (default 300)"`
+	Desktop    bool   `json:"desktop,omitempty" jsonschema:"Windows guests only: run in the session a user is logged into, so env_screenshot shows the window or dialog the command opens. Without it a command runs in session 0, which has no screen"`
 }
 
 type envExecOutput struct {
@@ -329,7 +482,20 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	port, user, password, key, err := e.SSHTarget(in.Name)
+	// Needed for every call now, not only the ones that name a shell: the
+	// marker that makes a timed-out command killable is spelled differently
+	// per shell, and it has to survive that shell's parser.
+	guest, err := e.ShellFor(in.Name)
+	if err != nil {
+		return nil, envExecOutput{}, err
+	}
+	var command string
+	var stdin io.Reader
+	if in.Desktop {
+		command, err = desktopCommand(in)
+	} else {
+		command, stdin, err = execRequest(in, func() (string, error) { return guest, nil })
+	}
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
@@ -340,10 +506,24 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	}
 
 	var out sshx.OutputBuffer
-	code, err := sshx.ExecTimeout(ctx, timeout, port, user, password, key, in.Command, &out, &out)
+	code, err := e.Exec(ctx, core.ExecRequest{
+		Env:        in.Name,
+		Command:    command,
+		Stdin:      stdin,
+		GuestShell: guest,
+		Timeout:    timeout,
+		// Always, unlike the CLI's opt-in flag: an agent cannot go and look at
+		// the guest, so a process left running where nobody can see it is
+		// worse than one killed.
+		KillOnTimeout: true,
+		Desktop:       in.Desktop,
+		Stdout:        &out,
+		Stderr:        &out,
+	})
 	if err != nil {
+		var killed *core.KilledError
 		var timedOut *sshx.TimeoutError
-		if errors.As(err, &timedOut) {
+		if errors.As(err, &killed) || errors.As(err, &timedOut) {
 			// Whatever it managed to print is the only clue about where it
 			// got stuck, so it goes in the error.
 			return nil, envExecOutput{}, fmt.Errorf("%w; output so far:\n%s", err, tail(out.String()))
@@ -351,6 +531,87 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 		return nil, envExecOutput{}, err
 	}
 	return nil, envExecOutput{ExitCode: code, Output: tail(out.String())}, nil
+}
+
+// desktopCommand is the command line a desktop run carries. It takes none of
+// the stdin routes execRequest prefers: a scheduled task action is a command
+// line with no stdin behind it, and cmd.exe is what runs it whatever the
+// guest's own session shell happens to be. Quoting for the guest's shell here
+// would be quoting for a shell that never sees the command.
+func desktopCommand(in envExecInput) (string, error) {
+	if in.Script != "" {
+		return "", fmt.Errorf("desktop runs a command line, not a script: a scheduled task has no stdin to read one from")
+	}
+	if in.Command == "" {
+		return "", fmt.Errorf("pass exactly one of command or script")
+	}
+	switch in.Shell {
+	case "", core.ShellCmd:
+		// The task action wraps this in cmd /c already.
+		return in.Command, nil
+	case core.ShellPowerShell:
+		// Base64: the task action is a cmd command line, and cmd splits on &
+		// and | inside every quoting it has.
+		return core.LaunchPowerShell(core.ShellCmd, in.Command), nil
+	case "sh", core.ShellPOSIX:
+		return "", fmt.Errorf("desktop is for Windows guests, which have no sh")
+	}
+	return "", fmt.Errorf("unknown shell %q: with desktop, one of powershell or cmd", in.Shell)
+}
+
+// execRequest turns the tool's input into the command an SSH session carries
+// and, for a script, what to feed its stdin. guestShell reports what the
+// guest's own sshd hands a command line to, and is only called when the
+// answer is needed.
+//
+// A plain command with no shell named is passed through untouched: the guest's
+// own shell reads it, which is what the description promises and what the
+// pipes and redirects in it depend on. A script, and anything under a named
+// shell that can read one, goes over stdin instead - the one route where no
+// shell but the intended one ever parses the text, and the reason these
+// parameters exist.
+func execRequest(in envExecInput, guestShell func() (string, error)) (string, io.Reader, error) {
+	if (in.Command == "") == (in.Script == "") {
+		return "", nil, fmt.Errorf("pass exactly one of command or script")
+	}
+	if in.Shell == "" && in.Script == "" {
+		return in.Command, nil, nil
+	}
+	if in.Shell == core.ShellCmd {
+		// cmd.exe reads no script from stdin. A command line it can run, but
+		// only through whatever shell sshd hands that line to first. Asked for
+		// implicitly - the guest simply runs cmd - a script gets PowerShell
+		// instead, which every such guest also has.
+		if in.Script != "" {
+			return "", nil, fmt.Errorf("shell cmd cannot run a script: use powershell, or a plain command")
+		}
+		// That first shell has to be quoted against: on a PowerShell guest an
+		// unquoted cmd line has its $, $() and ; read by PowerShell instead.
+		have, err := guestShell()
+		if err != nil {
+			return "", nil, err
+		}
+		return core.LaunchCmd(have, in.Command), nil, nil
+	}
+	shell, err := requestedShell(in.Shell, guestShell)
+	if err != nil {
+		return "", nil, err
+	}
+	text := in.Script
+	if text == "" {
+		text = in.Command
+	}
+	return core.ScriptCommand(shell), strings.NewReader(text), nil
+}
+
+// requestedShell resolves the shell parameter, asking the guest only when it
+// was left out.
+func requestedShell(want string, guestShell func() (string, error)) (string, error) {
+	shell, err := core.ParseShell(want)
+	if err != nil || shell != "" {
+		return shell, err
+	}
+	return guestShell()
 }
 
 // tail keeps the end of the output: that is where the error is.
@@ -375,7 +636,7 @@ type screenshotOutput struct {
 	Height int `json:"height"`
 }
 
-func envScreenshot(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.CallToolResult, screenshotOutput, error) {
+func envScreenshot(ctx context.Context, _ *mcp.CallToolRequest, in screenshotInput) (*mcp.CallToolResult, screenshotOutput, error) {
 	e, err := engine()
 	if err != nil {
 		return nil, screenshotOutput{}, err

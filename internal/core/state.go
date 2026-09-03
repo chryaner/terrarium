@@ -16,9 +16,25 @@ type Golden struct {
 	SSHKey   string `json:"ssh_key,omitempty"`
 	// stored in plain text: local dev tool, guest-only credentials
 	SSHPassword string `json:"ssh_password,omitempty"`
+	// Shell is what an SSH session lands in on this golden's guests - posix,
+	// cmd or powershell - and so how exec has to quote a command for them.
+	// Empty on records written before it existed, and on adopted Windows VMs
+	// that have not been reached yet: those are probed on first exec.
+	Shell string `json:"shell,omitempty"`
+	// Transport is how terrarium reaches this golden's guests: empty or "ssh"
+	// for SSH, "guestcontrol" for VirtualBox Guest Additions. Guest Additions
+	// are for a guest that cannot run an SSH server at all - a Windows that
+	// predates OpenSSH - and they need SSHUser and SSHPassword, which is the
+	// only authentication they have.
+	Transport string `json:"transport,omitempty"`
 	// Owned marks a VM terrarium built itself, so it is ours to delete.
 	// Adopted VMs belong to the user and are left alone.
 	Owned bool `json:"owned,omitempty"`
+	// OSType is the VirtualBox guest type id (Windows10_64, Debian_64). It is
+	// what makes the architecture visible before a fork rather than after a
+	// failed install, and it saves a VBoxManage call on every exec. Records
+	// written before terrarium stored it fill in on first read.
+	OSType string `json:"ostype,omitempty"`
 }
 
 // hasCreds reports whether terrarium can reach this golden's guests over SSH.
@@ -29,9 +45,13 @@ func (g *Golden) hasCreds() bool {
 }
 
 type Env struct {
-	VMName  string    `json:"vm_name"`
-	UUID    string    `json:"uuid,omitempty"`
-	Golden  string    `json:"golden"`
+	VMName string `json:"vm_name"`
+	UUID   string `json:"uuid,omitempty"`
+	// Golden is the image this env was forked from, empty for an env
+	// `terrarium create` built from an ISO: that machine is an installation
+	// in progress, with no image behind it and no credentials until it is
+	// promoted and adopted.
+	Golden  string    `json:"golden,omitempty"`
 	SSHPort int       `json:"ssh_port"`
 	Created time.Time `json:"created"`
 	// Share is the host folder mounted at GuestSharePath, empty if none.
@@ -42,6 +62,9 @@ type Env struct {
 	// Expires is when `terrarium gc` may remove this env. Zero means never:
 	// TTLs are opt-in, so an env forked without one lives until deleted.
 	Expires time.Time `json:"expires,omitempty"`
+	// OSType is the guest type id, inherited from the golden at fork time.
+	// See Golden.OSType.
+	OSType string `json:"ostype,omitempty"`
 }
 
 // State is terrarium's record of what it manages. VMs not in here are never

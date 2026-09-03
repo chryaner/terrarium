@@ -13,10 +13,12 @@ import (
 )
 
 var screenshotCmd = &cobra.Command{
-	Use:   "screenshot <env> [file]",
-	Short: "Capture the guest's screen to a PNG",
-	Long: `Captures whatever is on the guest's screen. Works on any running env,
-including one with no guest additions, no network and no SSH.`,
+	Use:   "screenshot <name> [file]",
+	Short: "Capture a running machine's screen to a PNG",
+	Long: `Captures whatever is on the screen. The name can be an env, a golden, or
+any VirtualBox VM by name, as long as it is running: reading a screen changes
+nothing. Needs no guest additions, no network and no SSH, which makes it the
+way to see what a machine whose login you do not know is asking for.`,
 	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		path := args[0] + ".png"

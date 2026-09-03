@@ -4,9 +4,8 @@
 name: win10
 path: win10.iso
 format: iso
-# Verified against the 22H2 x86 consumer ISO; for a 64-bit ISO set
-# ostype: Windows10_64.
-ostype: Windows10
+# The ISO decides the guest type and architecture; add `ostype: Windows10_64`
+# to override it.
 # Throwaway by design: it ends up in plain text in the state file. Add a local
 # recipe of the same name to change it.
 password: "1"

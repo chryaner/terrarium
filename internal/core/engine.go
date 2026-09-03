@@ -68,16 +68,72 @@ func (e *Engine) findVM(name string) (*vbox.VM, error) {
 	return nil, fmt.Errorf("no VirtualBox VM named %q", name)
 }
 
-// Adopt records an existing VM+snapshot as a golden image. Re-running
-// updates the record (e.g. to set SSH credentials later).
-func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapshot bool) (*Golden, error) {
-	if !validSSHUser(user) {
-		return nil, fmt.Errorf("ssh user contains an illegal character")
+// AdoptOpts is everything adopt records about a VM besides the VM itself.
+// All of it is optional: a machine whose login nobody knows is adopted with
+// none of it, and a later adopt fills in what the console turned up.
+type AdoptOpts struct {
+	// Image is the golden name to record under. Empty means the name the VM is
+	// already recorded under, or the VM's own name.
+	Image    string
+	Snapshot string
+	User     string
+	Password string
+	Key      string
+	// Shell is what an SSH session lands in; see Golden.Shell.
+	Shell string
+	// Transport is how terrarium reaches the guest; see Golden.Transport.
+	Transport string
+	// TakeSnapshot creates Snapshot when the VM does not have it. It is the
+	// only thing adopt changes about the user's VM.
+	TakeSnapshot bool
+}
+
+// adoptChecks validates an adopt and resolves the golden name it records
+// under, without touching VirtualBox, so the rules are testable without one.
+func adoptChecks(st *State, vmName string, o AdoptOpts) (string, error) {
+	if !validSSHUser(o.User) {
+		return "", fmt.Errorf("ssh user contains an illegal character")
+	}
+	if o.Shell != "" && !ValidShell(o.Shell) {
+		return "", fmt.Errorf("unknown shell %q: one of %s", o.Shell, strings.Join(Shells, ", "))
+	}
+	if o.Transport != "" && !validTransport(o.Transport) {
+		return "", fmt.Errorf("unknown transport %q: one of %s", o.Transport, strings.Join(Transports, ", "))
+	}
+	// Guest Additions have no key auth and no way to ask for one, so a record
+	// that cannot log in is worth refusing here rather than at the first exec.
+	if o.Transport == TransportGuestControl && o.User != "" && o.Password == "" {
+		return "", fmt.Errorf("the guestcontrol transport authenticates with a password: pass --password as well as --user")
+	}
+	if o.Image != "" {
+		if !goldenNameRe.MatchString(o.Image) {
+			return "", fmt.Errorf("invalid golden name %q (letters, digits, dots, dashes)", o.Image)
+		}
+		return o.Image, nil
+	}
+	// A VM already recorded under a golden name is that golden: a second
+	// record for the same VM would let rm --golden on one take the other.
+	for name, g := range st.Goldens {
+		if g.VMName == vmName {
+			return name, nil
+		}
+	}
+	return vmName, nil
+}
+
+// Adopt records an existing VM+snapshot as a golden image. Re-running updates
+// the record, which is how credentials are set later: adopt credless, work out
+// the login through the console, adopt again with what worked.
+func (e *Engine) Adopt(vmName string, o AdoptOpts) (*Golden, error) {
+	image, err := adoptChecks(e.St, vmName, o)
+	if err != nil {
+		return nil, err
 	}
 	vm, err := e.findVM(vmName)
 	if err != nil {
 		return nil, err
 	}
+	snapshot := o.Snapshot
 	if snapshot == "" {
 		snapshot = DefaultSnapshot
 	}
@@ -86,29 +142,49 @@ func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapsho
 		return nil, err
 	}
 	if !has {
-		if !takeSnapshot {
+		if !o.TakeSnapshot {
 			return nil, fmt.Errorf("%s has no snapshot %q: pass --take-snapshot to create it, or --snapshot to use an existing one", vmName, snapshot)
 		}
 		if err := e.VB.TakeSnapshot(vmName, snapshot); err != nil {
 			return nil, err
 		}
 	}
-	g := e.St.Goldens[vmName]
+	g := e.St.Goldens[image]
 	if g == nil {
 		g = &Golden{}
-		e.St.Goldens[vmName] = g
+		e.St.Goldens[image] = g
 	}
 	g.VMName = vmName
 	g.UUID = vm.UUID
 	g.Snapshot = snapshot
-	if user != "" {
-		g.SSHUser = user
+	// Probed now so `ls` and `info` can say what this thing is - the reason
+	// adopt exists is that terrarium knows nothing else about the VM. A
+	// VirtualBox that will not answer is not worth failing the adopt over.
+	if ostype, err := e.VB.OSTypeID(vmName); err == nil {
+		g.OSType = ostype
 	}
-	if password != "" {
-		g.SSHPassword = password
+	// Only what was passed, so an adopt that names one field leaves the rest
+	// of an existing record alone.
+	if o.User != "" {
+		g.SSHUser = o.User
 	}
-	if key != "" {
-		g.SSHKey = key
+	if o.Password != "" {
+		g.SSHPassword = o.Password
+	}
+	if o.Key != "" {
+		g.SSHKey = o.Key
+	}
+	if o.Transport != "" {
+		g.Transport = o.Transport
+	}
+	switch {
+	case o.Shell != "":
+		g.Shell = o.Shell
+	case g.Shell == "" && g.hasCreds() && g.OSType != "":
+		// The golden VM is not running and carries no port forward, so a
+		// Windows guest cannot be asked here: probeShell answers "" for it and
+		// the first exec against a fork settles it. --shell skips that.
+		g.Shell = probeShell(g.OSType, nil)
 	}
 	return g, e.St.Save()
 }
@@ -181,6 +257,10 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 		SSHPort: port,
 		Created: time.Now(),
 		Share:   opts.ShareHostPath,
+		// A clone runs the same guest as its golden, so the type is copied
+		// rather than probed again. Blank if the golden has none yet; the
+		// listing commands fill it in later.
+		OSType: g.OSType,
 	}
 	if opts.TTL > 0 {
 		env.Expires = env.Created.Add(opts.TTL)
@@ -281,7 +361,11 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 	if err := e.VB.StartHeadless(vmName); err != nil {
 		return err
 	}
-	if g.hasCreds() {
+	if transportOf(g) == TransportGuestControl {
+		if err := e.waitGuestControl(env, g, progress); err != nil {
+			return err
+		}
+	} else if g.hasCreds() {
 		if err := sshx.WaitReady(env.SSHPort, bootTimeout); err != nil {
 			return err
 		}
@@ -379,7 +463,11 @@ func (e *Engine) Start(name string, progress func(string)) (*Env, error) {
 // has no sshd to wait for and returns at once - it is driven through the
 // console instead.
 func (e *Engine) waitReady(env *Env, progress func(string)) error {
-	if !e.St.Goldens[env.Golden].hasCreds() {
+	g := e.St.Goldens[env.Golden]
+	if transportOf(g) == TransportGuestControl {
+		return e.waitGuestControl(env, g, progress)
+	}
+	if !g.hasCreds() {
 		progress(credlessNote)
 		return nil
 	}
@@ -427,7 +515,14 @@ func (e *Engine) Revert(name string, progress func(string)) error {
 	if err := e.VB.WaitOff(env.VMName, 30*time.Second); err != nil {
 		return err
 	}
-	progress("restoring clean state")
+	if env.Golden == "" {
+		// The clean snapshot of an ISO-installed env is the blank disk it was
+		// created with, so this is not "back to a working machine" - it is
+		// starting the installation over.
+		progress("restoring clean state (blank disk: this restarts the install)")
+	} else {
+		progress("restoring clean state")
+	}
 	// By name, not RestoreCurrent: taking a named snapshot makes that one
 	// current, so "current" would rewind to the user's last `terrarium
 	// snapshot` rather than the clean state this promises.
@@ -523,9 +618,22 @@ func (e *Engine) SSHTarget(name string) (port int, user, password, key string, e
 	if env == nil {
 		return 0, "", "", "", fmt.Errorf("no env %q", name)
 	}
+	// An env from `terrarium create` has no golden at all: nobody has told
+	// terrarium what account the OS being installed inside it ends up with,
+	// and there may not be one yet. Point at the way out rather than at
+	// adopting a golden that does not exist.
+	if env.Golden == "" {
+		return 0, "", "", "", fmt.Errorf("env %q has no credentials: it was created from an ISO, so drive it with `terrarium screenshot/type/keys/click`.\nonce the install is finished: `terrarium promote %s <image>`, then `terrarium adopt %s<image> --user <user> [--password <pw> | --key <path>]`",
+			name, name, goldenPrefix)
+	}
 	g := e.St.Goldens[env.Golden]
-	if g == nil || g.SSHUser == "" {
-		return 0, "", "", "", fmt.Errorf("golden %q has no SSH user: re-run `terrarium adopt %s --user <user> [--password <pw> | --key <path>]`", env.Golden, env.Golden)
+	if g == nil || !g.hasCreds() {
+		vmName := ""
+		if g != nil {
+			vmName = g.VMName
+		}
+		return 0, "", "", "", fmt.Errorf("golden %q has no usable credentials: work the login out through screenshot/type, then record it with `%s`",
+			env.Golden, AdoptHint(vmName, env.Golden))
 	}
 	return env.SSHPort, g.SSHUser, g.SSHPassword, g.SSHKey, nil
 }

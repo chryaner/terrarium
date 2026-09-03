@@ -46,3 +46,107 @@ func TestNT5PostInstallIsBatchSafe(t *testing.T) {
 		}
 	}
 }
+
+const testPubKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJq4/0d0h7Zc0VLC9WcpqZ+Nn8Jf3Yy4L6xX9x0aBcDe terrarium"
+
+// VirtualBox pastes the post-install into a .cmd, so a single metacharacter
+// costs a forty-minute install to discover.
+func TestWindowsPostInstallIsBatchSafe(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
+	for _, c := range []string{"%", "&", "|", "<", ">", "^", "\r", "\n"} {
+		if strings.Contains(cmd, c) {
+			t.Errorf("windowsPostInstall contains cmd metacharacter %q", c)
+		}
+	}
+	// One quoted -Command, so the inner quoting has to be single quotes.
+	if strings.Count(cmd, `"`) != 2 {
+		t.Errorf("expected exactly the one -Command quote pair, got %d quotes", strings.Count(cmd, `"`))
+	}
+	// VirtualBox truncates a long post-install command, and there is no
+	// warning when it does.
+	if len(cmd) > 1500 {
+		t.Errorf("post-install is %d chars, too long to rely on VirtualBox passing it whole", len(cmd))
+	}
+}
+
+// The two things that make a new golden usable the way the Linux ones are:
+// key auth, and a shell that needs one layer of quoting instead of three.
+func TestWindowsPostInstallInstallsKeyAndShell(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
+	for _, want := range []string{
+		testPubKey,
+		// sshd reads this file, and only this file, for administrators.
+		"administrators_authorized_keys",
+		// and ignores it silently unless nobody else can write it
+		"icacls",
+		"/inheritance:r",
+		`HKLM:\SOFTWARE\OpenSSH`,
+		"DefaultShell",
+		windowsDefaultShell,
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("post-install is missing %q:\n%s", want, cmd)
+		}
+	}
+	// The key has to be written before its ACL is fixed, and both after the
+	// capability that creates the directory.
+	if strings.Index(cmd, "Add-WindowsCapability") > strings.Index(cmd, "Set-Content") ||
+		strings.Index(cmd, "Set-Content") > strings.Index(cmd, "icacls") {
+		t.Errorf("post-install steps are out of order:\n%s", cmd)
+	}
+}
+
+// A fork nobody has logged into has no interactive session, so exec --desktop
+// and screenshot have nothing to show. Winlogon logging the account in by
+// itself is what gives every fork one.
+func TestWindowsPostInstallSetsAutoLogon(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
+	for _, want := range []string{
+		winlogonKey,
+		"AutoAdminLogon",
+		"DefaultUserName -Value 'terrarium'",
+		"DefaultPassword -Value 'pw'",
+	} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("post-install is missing %q: %s", want, cmd)
+		}
+	}
+	// A quote in the password would end the PowerShell string it is pasted
+	// into and leave the rest of the command as syntax.
+	if got := windowsPostInstall(testPubKey, "u", "it's"); !strings.Contains(got, "DefaultPassword -Value 'it''s'") {
+		t.Errorf("a quote in the password is not escaped: %s", got)
+	}
+}
+
+// The post-install is pasted into a .cmd, so a password with cmd syntax in it
+// breaks the whole provisioning step - forty minutes into an install, with
+// nothing in the error to say why.
+func TestBadPostInstallChar(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   string
+		bad  bool
+	}{
+		{"an ordinary password", "hunter2", false},
+		{"punctuation cmd does not read", "a-b_c.d!", false},
+		{"a quote would close the -Command string", `a"b`, true},
+		{"percent is a variable in a batch file", "a%b", true},
+		{"ampersand starts another command", "a&b", true},
+		{"a pipe redirects the whole line", "a|b", true},
+		{"angle brackets redirect", "a>b", true},
+		{"a caret escapes the next character", "a^b", true},
+		{"a line break ends the command", "a\r\nb", true},
+	} {
+		if got := badPostInstallChar(c.in) != ""; got != c.bad {
+			t.Errorf("%s: %q rejected=%v, want %v", c.name, c.in, got, c.bad)
+		}
+	}
+	// A password that passes has to survive into a post-install that is still
+	// batch-safe, which is what the check exists to guarantee.
+	cmd := windowsPostInstall(testPubKey, "terrarium", "a-b_c.d!")
+	for _, ch := range []string{"%", "&", "|", "<", ">", "^"} {
+		if strings.Contains(cmd, ch) {
+			t.Errorf("an accepted password still produced %q in the post-install", ch)
+		}
+	}
+}

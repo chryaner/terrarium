@@ -34,11 +34,33 @@ Environments are disposable and cheap to recreate. A guest with SSH
 credentials takes env_exec; one without is driven through env_screenshot,
 env_type, env_keys, env_click and env_scroll.
 
+An OS with no golden image can be installed by hand: env_create makes a blank
+machine with an ISO in its drive, the console tools drive the installer, and
+env_promote turns the finished machine into a golden. That golden starts with
+no credentials, so tell the user to record them with
+` + "`terrarium adopt <vm> --user <user> [--password <pw> | --key <path>]`" + ` in the
+CLI before env_exec will work on its forks.
+
+A Windows guest with no SSH server - anything older than Windows 10 - is
+reachable a third way when VirtualBox Guest Additions are installed in it:
+golden_adopt it with transport "guestcontrol" plus the guest's user and
+password, and env_exec, env_push and env_pull then work on its forks. Without
+Guest Additions there is no transport at all, and the console tools are the
+only way in.
+
 Golden images are the opposite: durable, disk-heavy, and owned by the user.
 Nothing here removes one - that is the user's call, via terrarium rm --golden
-in the CLI - so create one (golden_get, env_promote) only when the task asks
-for it, name it something the user will recognise, and report what was
-created.`
+in the CLI - so create one (golden_get, golden_import, env_promote) only when
+the task asks for it, name it something the user will recognise, and report
+what was created.
+
+Credentials are not needed up front. For a machine whose login nobody knows -
+an appliance someone exported years ago, an old VM - call golden_import or
+golden_adopt with no user or password, env_fork it, read the login prompt with
+env_screenshot, and try a guess with env_type. Once something works, call
+golden_adopt again with the user and password that worked: re-running it
+updates the record, and every env forked after that can use env_exec. Never
+guess at credentials in a golden record - record only what you saw work.`
 
 func newServer() *mcp.Server {
 	s := mcp.NewServer(
@@ -79,6 +101,27 @@ func newServer() *mcp.Server {
 	}, goldenGet)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "golden_import",
+		Description: "Register an .ova or .ovf appliance file already on this machine as a golden image. " +
+			"Unlike golden_get there is no recipe and no download, and nothing is seeded: an appliance " +
+			"exported from somewhere else has no cloud-init to wait for. The VM is imported, snapshotted " +
+			"where it stands and recorded as a golden env_fork can use. " +
+			"Credentials are optional - import without them, then work the login out through env_fork, " +
+			"env_screenshot and env_type, and record it with golden_adopt. " +
+			"Creates something durable that only the user can remove, so do it when the task asks for it.",
+	}, goldenImport)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "golden_adopt",
+		Description: "Record a VirtualBox VM that already exists on this machine as a golden image env_fork " +
+			"can use. The VM itself is not modified unless take_snapshot is set. " +
+			"Re-running it updates the record, which is how credentials are added later: adopt a machine " +
+			"with no user or password, fork it, read its login prompt with env_screenshot, try a guess " +
+			"with env_type, then adopt again with what worked. " +
+			"Records nothing about the guest that was not observed - never invent a user or password here.",
+	}, goldenAdopt)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_fork",
 		Description: "Create a new environment from a golden image and boot it. Takes under a minute and " +
 			"costs tens of MB of disk. The environment is disposable: anything done inside it is lost on " +
@@ -89,6 +132,37 @@ func newServer() *mcp.Server {
 	}, envFork)
 
 	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_create",
+		Description: "Create a blank environment with an installation ISO in its DVD drive and boot it, for " +
+			"an OS that has no recipe and no unattended installer - an old distribution, or one whose " +
+			"installer has to be answered by hand. The boot order is disk first, DVD second, so the " +
+			"installer runs while the disk is blank and the installed system boots itself afterwards. " +
+			"The result has no golden image and therefore no credentials: env_exec will not work on it. " +
+			"Drive the installer with env_screenshot, env_type, env_keys and env_click, and note that " +
+			"env_revert puts the blank disk back and restarts the install. When the OS is up, env_promote " +
+			"turns it into a golden - and golden_adopt then records the account created inside it. " +
+			"iso_path is a path on this host, where the server runs.",
+	}, envCreate)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_push",
+		Description: "Copy a file or directory from this host into an environment, over the same " +
+			"connection env_exec uses. local_path is on the host, where this server runs; " +
+			"guest_path is inside the guest and always uses forward slashes, Windows guests included " +
+			"(C:/Users/terrarium/setup.exe). Missing parent directories in the guest are created. " +
+			"Set recursive for a directory. Needs the same credentials env_exec needs.",
+	}, envPush)
+
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "env_pull",
+		Description: "Copy a file or directory out of an environment onto this host, over the same " +
+			"connection env_exec uses. guest_path is inside the guest and always uses forward " +
+			"slashes, Windows guests included; local_path is on the host, where this server runs, and " +
+			"its missing parent directories are created. Set recursive for a directory. " +
+			"Needs the same credentials env_exec needs.",
+	}, envPull)
+
+	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_start",
 		Description: "Boot a stopped environment and wait until SSH answers. Does nothing if it is already " +
 			"running. Fails if no environment by that name exists - use env_fork to create one.",
@@ -96,27 +170,41 @@ func newServer() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_exec",
-		Description: "Run a shell command inside an environment over SSH and return its exit code and output. " +
+		Description: "Run a shell command inside an environment and return its exit code and output. " +
 			"The command is one shell string: pipes, redirects, globs and quoting are interpreted by the " +
 			"guest shell, unlike the CLI's `terrarium exec`, which passes its arguments literally. " +
+			"Which shell that is: /bin/sh on Linux guests; on a Windows guest, the shell recorded for its " +
+			"golden, which is PowerShell for a golden terrarium built and cmd.exe for an older or adopted " +
+			"one, unless `terrarium adopt --shell` said otherwise. Pass shell (powershell, cmd or sh) to " +
+			"run under a different one, and script instead of command for anything multi-line or heavily " +
+			"quoted - a script reaches the shell on stdin, so nothing in it is re-parsed on the way. " +
 			"The environment must be running. Commands run as a user with passwordless sudo, so this can " +
 			"change or destroy anything inside the guest - the host is not affected. " +
+			"A command that outruns timeout_sec is killed in the guest, with its child processes, and the " +
+			"error says what was killed: nothing is left running where you cannot see it. " +
+			"On a Windows guest an ordinary command runs in session 0, which has no screen: if it opens a " +
+			"window or a dialog it waits there forever and env_screenshot shows nothing. Set desktop to run " +
+			"it in the session a user is logged into instead, where env_screenshot can see what it wants. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +
 			"env_screenshot, env_type, env_keys and env_click.",
 	}, envExec)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_screenshot",
-		Description: "Capture the environment's screen and return it as an image. This is how to see a guest " +
-			"that has no SSH - it needs nothing of the guest, not even a network. The environment must be " +
-			"running. The screen lags behind keystrokes, so after env_type or env_keys take a fresh " +
-			"screenshot to see what actually happened.",
+		Description: "Capture a running machine's screen and return it as an image. This is how to see a guest " +
+			"that has no SSH - it needs nothing of the guest, not even a network. " +
+			"The name can be an environment, a golden image, or any VirtualBox VM by name: reading a screen " +
+			"changes nothing, so this one is safe to point at a machine terrarium does not manage. The " +
+			"input tools (env_type, env_keys, env_click, env_scroll) are environments only. " +
+			"The machine must be running. The screen lags behind keystrokes, so after env_type or env_keys " +
+			"take a fresh screenshot to see what actually happened.",
 	}, envScreenshot)
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_type",
 		Description: "Type text into the environment's keyboard, as if a person were at it - the keystrokes go " +
-			"wherever the guest's focus happens to be, so check with env_screenshot first. The environment " +
+			"wherever the guest's focus happens to be, so check with env_screenshot first. Environments " +
+			"only: to type into a golden image, env_fork it and type into the fork. The environment " +
 			"must be running. Takes effect a moment after the call returns.",
 	}, envType)
 

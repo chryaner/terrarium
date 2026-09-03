@@ -176,6 +176,23 @@ memory: 4096
 and VS Code Remote-SSH sees it one click away. `down` parks it, `up` brings it
 back, `revert` resets it.
 
+### Everyday commands
+
+`terrarium ls` lists the machines with their guest type, and `terrarium info
+<name>` reports one in full - architecture, hardware, snapshot, credentials.
+`terrarium cp ./app.tar t1:/tmp/` moves files in or out over the env's own
+SSH. `terrarium create s11 --iso suse.iso --ostype OpenSUSE_64` installs an
+OS by hand from an ISO, see [Images](#images).
+
+- `exec <env> --shell powershell|cmd|sh -- <command...>` runs the command
+  under that shell instead of the one the guest's sshd would pick.
+- `exec <env> --stdin` reads a whole script from stdin and runs it in the
+  guest, so nothing in it needs escaping.
+- `exec <env> --kill-on-timeout` kills the command and its children in the
+  guest when the timeout fires, instead of leaving it running unwatched.
+- `exec <env> --desktop` runs it in the logged-in session of a Windows guest,
+  so a window or a dialog it opens is on the screen `screenshot` shows.
+
 ### Your AI agent gets real computers
 
 Setup is one command - see [Get started](#get-started). The same binary is an
@@ -314,11 +331,32 @@ so you download the ISO once and terrarium runs the real installer unattended:
 3. `terrarium get win10`. Fully unattended: about ten minutes for win10, seven
    for XP.
 
+A win10 golden comes out key-based like the Linux ones: the install generates
+an ed25519 pair, puts the public half in the guest and records the private
+one, so `ssh` and `scp` from the generated `~/.ssh/config` entry never prompt.
+Its SSH sessions land in PowerShell, so `exec` quotes for PowerShell rather
+than cmd.exe. A golden built by an older terrarium keeps its password and its
+cmd shell; re-run `terrarium get win10 --force` to rebuild it.
+
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
 and its recipe needs a product key you supply in a local override. Recipe
 details, private mirrors and the unattended-install internals are in
 [docs/DESIGN.md](docs/DESIGN.md).
+
+`adopt --transport guestcontrol --user <u> --password <pw>` reaches a Windows
+with no SSH server through VirtualBox Guest Additions instead, if they are
+installed in it, and `exec`, `cp` and the MCP tools then work on its forks.
+
+### Install any OS from an ISO by hand
+
+Some systems have neither a cloud image nor an installer that can be answered
+in advance. `terrarium create <name> --iso <path> --ostype <type>` builds a
+blank machine with the ISO in its drive and boots it, and you answer the
+installer through `screenshot`, `type`, `keys` and `click` - `revert` puts the
+blank disk back if you want to start over. The machine has no credentials
+until the install is done: `promote` it into a golden, then `adopt` that golden
+with the user and password you created inside it.
 
 ### Layer your own
 
@@ -341,6 +379,31 @@ setup:
 state you made by hand rather than by script, `terrarium promote <env> <name>`
 flattens a configured env into a golden directly. `terrarium rm --golden
 <name>` removes an image you are done with.
+
+### Machines you already have
+
+`terrarium adopt <vm>` records a VirtualBox VM you built yourself as a golden,
+without modifying it. `terrarium import <file.ova> --name <golden>` does the
+same for an appliance file: it imports and snapshots it, and seeds nothing, so
+an export that predates cloud-init imports instead of hanging.
+
+Neither needs credentials. When you do not know the login yet, adopt or import
+without one, fork it, and drive the fork through the console:
+
+```console
+$ terrarium import centos6.ova --name centos6
+$ terrarium fork centos6 probe
+$ terrarium screenshot probe          # read the login prompt
+$ terrarium type probe root --enter   # try one
+$ terrarium screenshot probe          # did it take?
+$ terrarium adopt trr-golden-centos6 --name centos6 --user root --password <pw>
+```
+
+Re-running `adopt` updates the record, so the last line is how a credentialless
+golden becomes one `exec` and `ssh` work against. `terrarium info <name>`
+reports what a golden or env actually is - guest type, architecture, hardware,
+snapshot and which credentials are recorded - and `screenshot` works on any
+running machine, including a golden or a VM terrarium does not manage.
 
 ## What it is not
 

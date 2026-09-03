@@ -2,11 +2,14 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/chryaner/terrarium/internal/recipe"
+	"github.com/chryaner/terrarium/internal/seed"
 	"github.com/chryaner/terrarium/internal/sshx"
 	"github.com/chryaner/terrarium/internal/vbox"
 )
@@ -21,12 +24,77 @@ import (
 // The capability installer usually adds the firewall rule itself; usually is
 // not good enough for something that decides whether the golden is reachable,
 // so it is created here too and failure to create it is ignored.
-const windowsPostInstall = `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
-	`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
-	`Set-Service -Name sshd -StartupType Automatic; ` +
-	`Start-Service sshd; ` +
-	`New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True ` +
-	`-Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue"`
+//
+// It does four things past starting sshd. PowerShell becomes the SSH default
+// shell, so a command sent to the guest needs one layer of quoting instead of
+// cmd.exe's three. The generated public key goes into
+// administrators_authorized_keys - the file sshd's stock config reads for
+// members of the administrators group - so a Windows golden is key-based like
+// the Linux ones and plain ssh and scp work from the generated ssh-config
+// without a password prompt. That file's ACL is reset to Administrators and
+// SYSTEM: sshd ignores it, silently, if anyone else can write it.
+//
+// And Winlogon is told to log the account in by itself. An SSH command lands
+// in session 0, which has no desktop, so `exec --desktop` and `screenshot`
+// need a session someone is logged into - and a fork nobody has typed a
+// password into has none. The password is written to the registry in clear,
+// which is what AutoAdminLogon is; it is the same throwaway password already
+// stored in plain text on the golden record, in a disposable VM.
+func windowsPostInstall(pubKey, user, password string) string {
+	return `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
+		`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
+		`Set-Service -Name sshd -StartupType Automatic; ` +
+		`Start-Service sshd; ` +
+		`New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True ` +
+		`-Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; ` +
+		`$k = 'HKLM:\SOFTWARE\OpenSSH'; ` +
+		`if (-not (Test-Path $k)) { New-Item -Path $k -Force }; ` +
+		`New-ItemProperty -Path $k -Name DefaultShell -Value '` + windowsDefaultShell + `' -PropertyType String -Force; ` +
+		`$w = '` + winlogonKey + `'; ` +
+		`Set-ItemProperty -Path $w -Name AutoAdminLogon -Value '1'; ` +
+		`Set-ItemProperty -Path $w -Name DefaultUserName -Value '` + psLiteral(user) + `'; ` +
+		`Set-ItemProperty -Path $w -Name DefaultPassword -Value '` + psLiteral(password) + `'; ` +
+		`$d = Join-Path $env:ProgramData ssh; ` +
+		`New-Item -Path $d -ItemType Directory -Force; ` +
+		`$a = Join-Path $d administrators_authorized_keys; ` +
+		`Set-Content -Path $a -Value '` + pubKey + `'; ` +
+		// SIDs, not names: the builtin groups are localised on non-English Windows.
+		`icacls $a /inheritance:r /grant *S-1-5-32-544:F /grant *S-1-5-18:F"`
+}
+
+// winlogonKey holds the automatic-logon settings. Spelled out rather than
+// composed: VirtualBox pastes this command into a batch file, where a %
+// would be eaten before PowerShell saw it.
+const winlogonKey = `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`
+
+// postInstallBadChars are the characters cmd.exe reads as syntax in the batch
+// file VirtualBox pastes the post-install command into, plus the quote that
+// would close its one -Command string. A value carrying any of them silently
+// breaks the whole provisioning step.
+const postInstallBadChars = `%&|<>^"`
+
+// badPostInstallChar names the first character that cannot go in the
+// post-install, or "" if the value is safe.
+func badPostInstallChar(s string) string {
+	if i := strings.IndexAny(s, postInstallBadChars); i >= 0 {
+		return strconv.Quote(string(s[i]))
+	}
+	if strings.ContainsAny(s, "\r\n") {
+		return "a line break"
+	}
+	return ""
+}
+
+// psLiteral escapes a value for the single-quoted PowerShell string it is
+// pasted into. A quote is the only thing single quotes cannot carry, and it is
+// written twice to spell itself.
+func psLiteral(s string) string { return strings.ReplaceAll(s, "'", "''") }
+
+// windowsDefaultShell is what sshd hands an exec request to once the
+// post-install has pointed it there. Windows PowerShell rather than pwsh: it
+// is in the box, and installing anything else would be another thing to go
+// wrong an hour into an install.
+const windowsDefaultShell = `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
 
 // windowsShutdown is the Windows spelling of `shutdown -h now`.
 const windowsShutdown = "shutdown /s /t 0"
@@ -49,33 +117,60 @@ func isWindowsGuest(ostype string) bool {
 	return strings.HasPrefix(ostype, "Windows")
 }
 
-// GuestIsWindows reports whether an env's guest runs Windows, which decides
-// how a command's argv has to be quoted for its shell. The VM's own guest
-// type is the only answer available: golden records store no OS, a promoted
-// golden has no recipe at all, and a derived recipe's ostype says nothing
-// about its base - it defaults to Linux_64 even when that base is Windows.
-func (e *Engine) GuestIsWindows(envName string) (bool, error) {
-	env := e.St.Envs[envName]
-	if env == nil {
-		return false, fmt.Errorf("no env %q", envName)
+// resolveISOOSType decides which guest type an ISO build creates its VM with.
+// The recipe is a guess written once; the ISO in front of us is the fact, and a
+// recipe pinned to a 32-bit Windows under an x64 disc fails deep inside setup
+// with nothing to say why. So the detected type wins any disagreement about
+// architecture, and the recipe still wins where they agree - it may name a more
+// specific edition than detection can.
+func resolveISOOSType(image, fromRecipe, detected string, progress func(string)) (string, error) {
+	switch {
+	case fromRecipe == "" && detected == "":
+		return "", fmt.Errorf("recipe %s: VirtualBox cannot tell what this ISO installs.\nadd the guest type to the recipe, e.g. `ostype: Windows10_64` (`VBoxManage list ostypes` lists them); copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ to override a shipped one", image)
+	case fromRecipe == "":
+		progress("the ISO installs " + detected + " (" + ArchOf(detected) + ")")
+		return detected, nil
+	case detected == "":
+		return fromRecipe, nil
+	case ArchOf(fromRecipe) != ArchOf(detected):
+		progress(fmt.Sprintf("recipe says %s (%s) but the ISO is %s: using %s",
+			fromRecipe, ArchOf(fromRecipe), ArchOf(detected), detected))
+		return detected, nil
+	default:
+		return fromRecipe, nil
 	}
-	ostype, err := e.VB.OSType(env.VMName)
-	if err != nil {
-		return false, err
-	}
-	return isWindowsGuest(ostype), nil
 }
 
 // buildWindowsGolden installs Windows from an ISO. Unlike the cloud image
 // paths there is nothing to import: VirtualBox drives Windows setup through
 // its own generated answer file, which takes tens of minutes. That cost is
 // paid once - forks of the resulting golden boot at normal speed.
-func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath string, cpus, memMB int, progress func(string)) (*Golden, error) {
+func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, goldensDir string, cpus, memMB int, progress func(string)) (*Golden, error) {
 	// Checked before the install, not when the golden is recorded: a bad user
 	// name should not cost forty minutes to find out about.
 	if !validSSHUser(r.User) {
 		return nil, fmt.Errorf("recipe %s: ssh user contains an illegal character", image)
 	}
+	// Same reason, same cost: the password is pasted into the post-install
+	// batch file, where any of these would end the command PowerShell was
+	// meant to run - and the install is forty minutes gone before anyone
+	// finds out.
+	if c := badPostInstallChar(r.Password); c != "" {
+		return nil, fmt.Errorf("recipe %s: the password contains %s, which the guest's post-install script cannot carry.\nit is pasted into a batch file, so none of %s may appear in it - copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ and use a password without them",
+			image, c, postInstallBadChars)
+	}
+	// The disc knows what it installs; the recipe only thinks it does. Wrong
+	// here means a 32-bit VM created for a 64-bit installer, which fails long
+	// after this point and says nothing about why.
+	detected, err := e.VB.DetectISOType(isoPath)
+	if err != nil {
+		progress("could not read the ISO's guest type: " + err.Error())
+	}
+	ostype, err := resolveISOOSType(image, r.OSType, detected, progress)
+	if err != nil {
+		return nil, err
+	}
+	r.OSType = ostype
 	// Same reasoning, both cost tens of minutes to discover at install time:
 	// XP-era setup halts at the key screen without a key, and it has no SSH
 	// server for the default post-install to reach, so the readiness wait
@@ -97,14 +192,14 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath stri
 	}
 
 	// From here the VM is registered, so failures leave it for inspection.
-	g, err := e.installWindows(r, image, vmName, isoPath, filepath.Join(folder, vmName), cpus, memMB, progress)
+	g, err := e.installWindows(r, image, vmName, isoPath, goldensDir, filepath.Join(folder, vmName), cpus, memMB, progress)
 	if err != nil {
 		return nil, leftRegistered(vmName, err)
 	}
 	return g, nil
 }
 
-func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolder string, cpus, memMB int, progress func(string)) (*Golden, error) {
+func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, goldensDir, vmFolder string, cpus, memMB int, progress func(string)) (*Golden, error) {
 	if err := e.VB.SetFirmwareTPM(vmName, r.UseEFI(), r.UseTPM()); err != nil {
 		return nil, err
 	}
@@ -146,10 +241,24 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 	}
 
 	// A guest with no SSH still needs a completion signal, so its whole
-	// post-install is a shutdown: setup finishing turns the machine off.
-	postCmd := windowsPostInstall
-	if !r.UseSSH() {
-		postCmd = nt5PostInstall
+	// post-install is a shutdown: setup finishing turns the machine off, and
+	// there is nothing to install a key for.
+	postCmd := nt5PostInstall
+	var keyPath string
+	if r.UseSSH() {
+		keyPath = seed.KeyPath(goldensDir, image)
+		if err := os.MkdirAll(filepath.Dir(keyPath), 0o700); err != nil {
+			return nil, err
+		}
+		// The same generator the cloud images use; the post-install installs
+		// the public half where cloud-init would have.
+		// A fixed label: the recipe user is pasted into a batch file by the
+		// post-install, and a quote or ampersand in it would break out.
+		pubKey, err := sshx.EnsureKey(keyPath, "terrarium")
+		if err != nil {
+			return nil, err
+		}
+		postCmd = windowsPostInstall(pubKey, r.User, r.Password)
 	}
 
 	progress(fmt.Sprintf("unattended install, up to %d min (once per image; forks are seconds)", r.InstallTimeoutMin))
@@ -177,7 +286,7 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 			return nil, fmt.Errorf("%w\nthe install may have stalled: check the console, or C:\\vboxpostinstall.log in the guest", err)
 		}
 		progress("install finished, SSH is up")
-		if err := e.shutdownGuest(vmName, port, r.User, r.Password, "", windowsShutdown, progress); err != nil {
+		if err := e.shutdownGuest(vmName, port, r.User, r.Password, keyPath, windowsShutdown, progress); err != nil {
 			return nil, err
 		}
 	} else {
@@ -194,7 +303,11 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, vmFolde
 	g := &Golden{VMName: vmName}
 	if r.UseSSH() {
 		g.SSHUser = r.User
+		g.SSHKey = keyPath
+		// The password stays on the record beside the key: RDP authenticates
+		// with it, and it is what unlocks the console.
 		g.SSHPassword = r.Password
+		g.Shell = ShellPowerShell
 	}
 	return e.recordGolden(image, g, progress)
 }

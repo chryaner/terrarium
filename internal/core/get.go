@@ -86,7 +86,7 @@ func (e *Engine) get(image string, cpus, memMB int, force bool, depth int, progr
 	// cloud-init to seed.
 	if r.Format == recipe.FormatISO {
 		progress(fmt.Sprintf("creating %s (%d cpu, %d MB, %d GB disk)", vmName, cpus, memMB, r.DiskGB))
-		return e.buildWindowsGolden(r, image, vmName, imagePath, cpus, memMB, progress)
+		return e.buildWindowsGolden(r, image, vmName, imagePath, filepath.Join(dir, "goldens"), cpus, memMB, progress)
 	}
 
 	progress("generating SSH key and cloud-init seed")
@@ -338,6 +338,7 @@ func (e *Engine) buildGolden(image, vmName, keyPath, isoPath string, progress fu
 		VMName:  vmName,
 		SSHUser: seed.User,
 		SSHKey:  keyPath,
+		Shell:   ShellPOSIX,
 	}, progress)
 }
 
@@ -368,6 +369,14 @@ func (e *Engine) recordGolden(image string, g *Golden, progress func(string)) (*
 	g.Owned = true
 	if vm, err := e.findVM(g.VMName); err == nil {
 		g.UUID = vm.UUID
+	}
+	// Read back rather than taken from the recipe: an imported appliance
+	// brings its own guest type, and an ISO build may have used the type
+	// detection rather than what the recipe said.
+	if g.OSType == "" {
+		if ostype, err := e.VB.OSTypeID(g.VMName); err == nil {
+			g.OSType = ostype
+		}
 	}
 	e.St.Goldens[image] = g
 	return g, e.St.Save()

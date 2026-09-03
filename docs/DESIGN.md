@@ -88,6 +88,29 @@ are obvious and all of them cost time to rediscover:
    finishes. terrarium ejects them itself before snapshotting - a golden that
    boots the installer again on every fork is not a golden.
 
+The post-install does four more things with that one command line, and they
+are what makes a Windows golden behave like a Linux one. It writes the
+generated ed25519 public key into
+`%ProgramData%\ssh\administrators_authorized_keys` - the only
+`AuthorizedKeysFile` sshd's stock config reads for an account in the
+administrators group - and resets that file's ACL to Administrators and SYSTEM,
+without which sshd ignores it and says nothing. It points
+`HKLM\SOFTWARE\OpenSSH\DefaultShell` at `powershell.exe`, so a command sent
+over SSH is parsed once by PowerShell instead of three times by cmd.exe. And it
+sets Winlogon to log the account in by itself, so every fork has an interactive
+session for `screenshot` and `exec --desktop` to work in; that means the
+password goes into `HKLM\...\Winlogon` in clear, which is what `AutoAdminLogon`
+is, and it is the same throwaway password the recipe already keeps in plain
+text. The golden keeps that password as well as the key, because RDP and the
+console still authenticate with it.
+
+That is also why goldens carry a `shell` field. Quoting an argv is
+shell-specific and there is no spelling that works for more than one of them,
+so the record says which: `posix`, `cmd` or `powershell`. Goldens terrarium
+built know their own answer; an adopted or older one is asked once, with
+`echo %COMSPEC%` - cmd expands it, PowerShell echoes it back - and the answer
+is written to state so no later command pays for it.
+
 The install took ten and a half minutes measured on a fast desktop, and can
 plausibly take half an hour on modest hardware, against roughly 40 seconds for
 a Linux cloud image. That is the price of a real installer, and it is paid
@@ -230,9 +253,80 @@ Forking a credentialless golden skips the readiness wait entirely - there is no
 banner coming - and settles for 15 seconds before taking the clean snapshot, so
 the revert target is a booting machine rather than a BIOS screen.
 
+`screenshot` accepts any running VM - an env, a golden, or one terrarium does
+not manage - because reading the framebuffer changes nothing, and the first
+question about a machine with an unknown login is "what is on its screen".
+The input verbs stay bound to envs: typing into a golden would mutate the one
+thing the model promises never changes, and a fork costs a tenth of a second.
+
 All VBoxManage specifics stay behind `internal/vbox`. The rest of the code
 speaks abstract verbs (`Fork`, `Exec`, `WaitReady`), so a future QEMU or
 Hyper-V driver slots in without touching anything above it.
+
+## Reaching a guest: transports, files and the exec runtime
+
+Everything above assumes SSH, and SSH is still the default: it needs nothing
+installed by terrarium and works the same for every guest that has an sshd.
+What follows is for the guests that have no sshd, and for the commands SSH
+cannot control once they have started.
+
+**Transports.** A golden carries a `transport`: blank or `ssh`, or
+`guestcontrol`, which runs commands through VirtualBox Guest Additions
+(`VBoxManage guestcontrol run`) and copies files with `copyto`/`copyfrom`.
+It exists for Windows guests that have Guest Additions and no sshd - XP or
+Windows 7 machines the user built by hand - and it is set on `adopt`, never
+guessed. The readiness wait for such a fork asks for the additions' version
+property instead of an SSH banner. Its cost is that the guest password rides
+on the VBoxManage command line for every call, which is why it is opt-in and
+why the console tools remain the answer for anything without additions. The
+recorded `shell` still decides quoting; the transport only decides who
+launches the shell.
+
+**Files.** `cp` uses SFTP on the same connection and credentials as `exec`,
+so anything exec can reach cp can reach, and a Windows guest works because
+OpenSSH's stock config already ships an SFTP subsystem. The spec syntax is
+scp's `env:path`; a single character before the colon is a drive letter, not
+an env, which costs one-letter env names their spec and nothing else.
+
+**Kill on timeout.** An SSH session cannot cancel what it started: closing it
+leaves the process running, and a Windows command that opened a dialog runs
+forever. So a command that may be killed is tagged with a marker the guest can
+see - a trailing `# trr:<id>` comment in PowerShell and sh, a leading `set
+TRR_MARK=trr:<id> &` in cmd, which has no comment syntax and hands back the
+exit code of whatever ran last - and when the deadline passes a second session
+finds every process whose command line carries the marker and kills the tree
+(`taskkill /T`, or `pkill -f`). The marker is the only handle that works
+across all three shells without an agent in the guest. The MCP server always
+kills: an agent cannot go and look at a hung process, so a leaked one is
+strictly worse than a killed one.
+
+**Desktop mode.** SSH sessions on Windows run in session 0, where a window is
+invisible and a dialog blocks forever.
+`exec --desktop` runs the command as a scheduled task marked interactive, so
+it lands in the logged-in session that `screenshot` shows, with its output
+redirected to a file the normal session reads back. It needs someone logged
+on at the console; new goldens get Winlogon autologon in the post-install for
+exactly that, and older ones get an error that says how to log in through
+the console tools.
+
+**Hand installs and appliances.** `create --iso` builds a blank machine with
+the ISO in its drive and boots it, recorded as an env with no golden and so
+no credentials: an installation in progress, driven through the console
+tools. Boot order is disk first, DVD second, so the empty disk falls through
+to the installer and the finished install boots itself with no eject step;
+`revert` lands on the blank disk, which is "start the install over". Once
+installed it is `promote`d into a golden and `adopt`ed with the account
+created inside it. `import` takes an OVA or OVF the same way `adopt` takes a
+VM: it imports, snapshots and records, and seeds nothing, because a legacy
+export has no cloud-init and waiting for one is exactly how importing a
+vendor appliance hangs. Both are terrarium's own VMs (owned, so `rm` deletes
+them), unlike an adopted one.
+
+**What a record says.** Goldens and envs cache the VirtualBox guest type, and
+`info` derives the architecture from it, because the one thing nobody could
+see before the first Windows install failed was that the recipe pinned a
+32-bit guest under an x64 ISO. The build now asks the ISO (`unattended
+detect`) and the detected type wins any disagreement about architecture.
 
 ## Safety policy
 

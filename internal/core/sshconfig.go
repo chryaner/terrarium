@@ -51,17 +51,51 @@ func RenderSSHConfig(st *State) string {
 		if g != nil && g.SSHUser != "" && singleLine(g.SSHUser) {
 			fmt.Fprintf(&b, "  User %s\n", g.SSHUser)
 		}
-		if g != nil && g.SSHKey != "" && singleLine(g.SSHKey) {
+		switch {
+		case g != nil && g.SSHKey != "" && singleLine(g.SSHKey):
 			// ssh reads backslashes as escapes even on Windows. Explicit
 			// replace, not filepath.ToSlash: behavior must not depend on the
 			// build OS (CI runs these tests on Linux).
 			fmt.Fprintf(&b, "  IdentityFile %s\n", strings.ReplaceAll(g.SSHKey, `\`, "/"))
+		case passwordAuth(g):
+			// There is no IdentityFile to write and nothing here can supply a
+			// password, so ssh and scp pop an askpass dialog with no clue
+			// where it came from. Say so in the block the user is reading.
+			fmt.Fprint(&b, "  "+passwordAuthNote+"\n")
 		}
 		fmt.Fprintf(&b, "  StrictHostKeyChecking no\n")
 		fmt.Fprintf(&b, "  UserKnownHostsFile NUL\n")
 		fmt.Fprintf(&b, "  LogLevel ERROR\n")
 	}
 	return b.String()
+}
+
+// passwordAuthNote goes in the block of an env whose golden has a password
+// and no key: the entry otherwise looks like every other one.
+const passwordAuthNote = "# password auth: terrarium ssh/exec handle it, plain ssh and scp will prompt"
+
+// passwordAuth reports whether a golden can only be reached with a password.
+func passwordAuth(g *Golden) bool {
+	return g != nil && g.SSHUser != "" && g.SSHKey == "" && g.SSHPassword != ""
+}
+
+// PasswordAuthGoldens names the goldens, sorted, that at least one env is
+// forked from and that have no key. Whoever rewrites the config says so out
+// loud: otherwise the first sign is a credential prompt from scp, much later,
+// with nothing in it to connect back to terrarium.
+func PasswordAuthGoldens(st *State) []string {
+	seen := map[string]bool{}
+	for _, env := range st.Envs {
+		if passwordAuth(st.Goldens[env.Golden]) {
+			seen[env.Golden] = true
+		}
+	}
+	names := make([]string, 0, len(seen))
+	for name := range seen {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // UpdateSSHConfig rewrites the managed section of the user's ssh config.

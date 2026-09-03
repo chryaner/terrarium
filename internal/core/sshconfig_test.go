@@ -211,3 +211,44 @@ func TestUpdateSSHConfigUsesProfile(t *testing.T) {
 		t.Errorf("unexpected config:\n%s", data)
 	}
 }
+
+// A password-only env's block otherwise looks like every other one, so `scp
+// <env>:` pops an askpass dialog with nothing in it to say where it came
+// from. The block has to admit what it is.
+func TestRenderSSHConfigMarksPasswordAuth(t *testing.T) {
+	out := RenderSSHConfig(testState())
+
+	legacy := out[strings.Index(out, "Host legacy"):]
+	if !strings.Contains(legacy, "  "+passwordAuthNote+"\n") {
+		t.Errorf("a password-only golden's block should say so:\n%s", legacy)
+	}
+	// The note is a comment, so ssh reads past it: nothing in the block may
+	// look like a directive.
+	if !strings.Contains(legacy, "  #") {
+		t.Error("the note must be a comment, or ssh will reject the config")
+	}
+	// A key-based env has nothing to warn about and must not be cluttered.
+	api := out[strings.Index(out, "Host api"):strings.Index(out, "Host legacy")]
+	if strings.Contains(api, passwordAuthNote) {
+		t.Errorf("a key golden's block should not carry the note:\n%s", api)
+	}
+}
+
+// Which goldens the CLI names when it rewrites the config.
+func TestPasswordAuthGoldens(t *testing.T) {
+	st := testState()
+	if got := PasswordAuthGoldens(st); len(got) != 1 || got[0] != "centos7" {
+		t.Errorf("got %v, want [centos7]", got)
+	}
+	// A golden with both is key-based; the password is there for RDP and the
+	// console, which is what a Windows golden looks like now.
+	st.Goldens["centos7"].SSHKey = `C:\keys\centos7`
+	if got := PasswordAuthGoldens(st); len(got) != 0 {
+		t.Errorf("a golden with a key needs no warning, got %v", got)
+	}
+	// Nothing is forked from it, so nothing in the config mentions it.
+	st.Goldens["unused"] = &Golden{VMName: "unused", SSHUser: "root", SSHPassword: "x"}
+	if got := PasswordAuthGoldens(st); len(got) != 0 {
+		t.Errorf("a golden with no envs is not in the config, got %v", got)
+	}
+}

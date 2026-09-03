@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -47,10 +46,14 @@ func (e *TimeoutError) Error() string {
 		e.Timeout, e.Command)
 }
 
-// ExecTimeout is ExecStreams with a ceiling on how long to wait. Whatever the
-// command printed before the deadline has already been written to stdout and
-// stderr, which is the only thing left to go on when it hangs.
-func ExecTimeout(ctx context.Context, timeout time.Duration, port int, user, password, keyPath, command string, stdout, stderr io.Writer) (int, error) {
+// ExecScript is ExecStreams with a ceiling on how long to wait and an optional
+// script fed to the command's own stdin, for the shells that read one there:
+// `sh -s`, `powershell -Command -`. That is the one way to hand a guest a
+// multi-line script without it passing through anybody's quoting on the way.
+//
+// Whatever the command printed before the deadline has already been written to
+// stdout and stderr, which is the only thing left to go on when it hangs.
+func ExecScript(ctx context.Context, timeout time.Duration, port int, user, password, keyPath, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -60,7 +63,7 @@ func ExecTimeout(ctx context.Context, timeout time.Duration, port int, user, pas
 	}
 	done := make(chan result, 1)
 	go func() {
-		code, err := ExecStreams(port, user, password, keyPath, command, stdout, stderr)
+		code, err := execStreams(port, user, password, keyPath, command, stdin, stdout, stderr)
 		done <- result{code, err}
 	}()
 
@@ -80,45 +83,13 @@ func Exec(port int, user, password, keyPath, command string) (int, error) {
 }
 
 // ExecStreams is Exec with the guest's output redirected, so callers that
-// need to inspect it (first-boot orchestration) can. Uses the Go SSH client
-// so password auth works non-interactively (ssh.exe always prompts). Host key
-// checking is off: fork host keys rotate on every clone.
+// need to inspect it (first-boot orchestration) can.
 func ExecStreams(port int, user, password, keyPath, command string, stdout, stderr io.Writer) (int, error) {
-	var auth []ssh.AuthMethod
-	if keyPath != "" {
-		data, err := os.ReadFile(keyPath)
-		if err != nil {
-			return -1, err
-		}
-		signer, err := ssh.ParsePrivateKey(data)
-		if err != nil {
-			return -1, fmt.Errorf("parsing key %s: %w", keyPath, err)
-		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	}
-	if password != "" {
-		auth = append(auth,
-			ssh.Password(password),
-			// some sshds only offer keyboard-interactive for passwords
-			ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-				answers := make([]string, len(questions))
-				for i := range answers {
-					answers[i] = password
-				}
-				return answers, nil
-			}))
-	}
-	if len(auth) == 0 {
-		return -1, fmt.Errorf("no SSH credentials: adopt the golden with --user and --password or --key")
-	}
+	return execStreams(port, user, password, keyPath, command, nil, stdout, stderr)
+}
 
-	cfg := &ssh.ClientConfig{
-		User:            user,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
-	}
-	client, err := ssh.Dial("tcp", "127.0.0.1:"+strconv.Itoa(port), cfg)
+func execStreams(port int, user, password, keyPath, command string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	client, err := Dial(port, user, password, keyPath)
 	if err != nil {
 		return -1, err
 	}
@@ -130,10 +101,14 @@ func ExecStreams(port int, user, password, keyPath, command string, stdout, stde
 	}
 	defer sess.Close()
 
-	// Stdin stays nil. Every command run through here is non-interactive, and
-	// setting it makes the ssh client copy from os.Stdin - which under
-	// `terrarium mcp` is the JSON-RPC transport, so the first exec would eat
-	// protocol frames. Interactive shells go through ssh.exe in cli/sshcmd.go.
+	// A nil stdin stays nil. Defaulting it to os.Stdin would make the ssh
+	// client copy from the JSON-RPC transport under `terrarium mcp`, so the
+	// first exec would eat protocol frames; script mode passes the script it
+	// wants read and nothing else. Interactive shells go through ssh.exe in
+	// cli/sshcmd.go.
+	if stdin != nil {
+		sess.Stdin = stdin
+	}
 	sess.Stdout = stdout
 	sess.Stderr = stderr
 
