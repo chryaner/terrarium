@@ -325,23 +325,13 @@ func envCreate(ctx context.Context, _ *mcp.CallToolRequest, in envCreateInput) (
 	if err != nil {
 		return nil, envOutput{}, err
 	}
+	// Omitted hardware fields arrive as zero and Create fills in the defaults.
 	o := core.CreateOpts{
 		ISO:    in.ISOPath,
 		OSType: in.OSType,
 		DiskGB: in.DiskGB,
 		CPUs:   in.CPUs,
 		MemMB:  in.MemoryMB,
-	}
-	// Unlike cpus and memory, a zero disk is not "inherit": createmedium would
-	// refuse it and the caller usually just left the field out.
-	if o.DiskGB == 0 {
-		o.DiskGB = core.DefaultDiskGB
-	}
-	if o.CPUs == 0 {
-		o.CPUs = core.DefaultCPUs
-	}
-	if o.MemMB == 0 {
-		o.MemMB = core.DefaultMemoryMB
 	}
 	var log []string
 	// Create rolls a failure back itself, so there is nothing for env_rm to do.

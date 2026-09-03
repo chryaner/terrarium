@@ -11,13 +11,28 @@ import (
 // installer that uses a tenth of it costs a tenth of it.
 const DefaultDiskGB = 32
 
-// CreateOpts describes a machine to install by hand from an ISO.
+// CreateOpts describes a machine to install by hand from an ISO. ISO and
+// OSType are required; the hardware fields take terrarium's defaults when they
+// are left at zero, which is not a size any machine could be built with.
 type CreateOpts struct {
 	ISO    string
 	OSType string
 	DiskGB int
 	CPUs   int
 	MemMB  int
+}
+
+func (o CreateOpts) withDefaults() CreateOpts {
+	if o.DiskGB == 0 {
+		o.DiskGB = DefaultDiskGB
+	}
+	if o.CPUs == 0 {
+		o.CPUs = DefaultCPUs
+	}
+	if o.MemMB == 0 {
+		o.MemMB = DefaultMemoryMB
+	}
+	return o
 }
 
 // createChecks validates a create before anything is registered, so the rules
@@ -57,6 +72,7 @@ func createChecks(st *State, name string, o CreateOpts, vmNames map[string]bool)
 // driven through the console tools until the OS inside it is installed and
 // can be promoted.
 func (e *Engine) Create(name string, o CreateOpts, progress func(string)) (*Env, error) {
+	o = o.withDefaults()
 	vms, err := e.VB.ListVMs()
 	if err != nil {
 		return nil, err
