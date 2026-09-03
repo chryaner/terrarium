@@ -124,19 +124,19 @@ func shellFlag(v string) (string, error) {
 // execCommand builds the one command string an SSH session carries. want is
 // the shell that has to read the command; have is the shell sshd will hand
 // the line to. Equal, the quoting is the whole job. Different, the line has to
-// start the wanted shell - and it still passes through the guest's own shell
-// first, so it carries only what survives both.
+// start the wanted shell - and the guest's own shell parses it first, so the
+// wrapper is quoted for have while its payload is quoted for want.
 func execCommand(want, have string, argv []string) string {
 	if want == have {
 		return quoteFor(want, argv)
 	}
 	switch want {
 	case core.ShellPowerShell:
-		return "powershell -NoProfile -NonInteractive -Command " + sshx.QuotePowerShell(argv)
+		return core.LaunchPowerShell(have, sshx.QuotePowerShell(argv))
 	case core.ShellCmd:
-		return "cmd /c " + strings.Join(argv, " ")
+		return core.LaunchCmd(have, strings.Join(argv, " "))
 	default:
-		return sshx.QuotePOSIX([]string{"sh", "-c", sshx.QuotePOSIX(argv)})
+		return core.LaunchSh(have, sshx.QuotePOSIX(argv))
 	}
 }
 

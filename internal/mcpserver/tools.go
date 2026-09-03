@@ -527,7 +527,13 @@ func execRequest(in envExecInput, guestShell func() (string, error)) (string, io
 		if in.Script != "" {
 			return "", nil, fmt.Errorf("shell cmd cannot run a script: use powershell, or a plain command")
 		}
-		return "cmd /c " + in.Command, nil, nil
+		// That first shell has to be quoted against: on a PowerShell guest an
+		// unquoted cmd line has its $, $() and ; read by PowerShell instead.
+		have, err := guestShell()
+		if err != nil {
+			return "", nil, err
+		}
+		return core.LaunchCmd(have, in.Command), nil, nil
 	}
 	shell, err := requestedShell(in.Shell, guestShell)
 	if err != nil {
