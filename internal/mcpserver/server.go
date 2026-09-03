@@ -146,8 +146,8 @@ func newServer() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_push",
-		Description: "Copy a file or directory from this host into an environment, over SFTP on the " +
-			"environment's own SSH connection. local_path is on the host, where this server runs; " +
+		Description: "Copy a file or directory from this host into an environment, over the same " +
+			"connection env_exec uses. local_path is on the host, where this server runs; " +
 			"guest_path is inside the guest and always uses forward slashes, Windows guests included " +
 			"(C:/Users/terrarium/setup.exe). Missing parent directories in the guest are created. " +
 			"Set recursive for a directory. Needs the same credentials env_exec needs.",
@@ -155,8 +155,8 @@ func newServer() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_pull",
-		Description: "Copy a file or directory out of an environment onto this host, over SFTP on the " +
-			"environment's own SSH connection. guest_path is inside the guest and always uses forward " +
+		Description: "Copy a file or directory out of an environment onto this host, over the same " +
+			"connection env_exec uses. guest_path is inside the guest and always uses forward " +
 			"slashes, Windows guests included; local_path is on the host, where this server runs, and " +
 			"its missing parent directories are created. Set recursive for a directory. " +
 			"Needs the same credentials env_exec needs.",
@@ -170,7 +170,7 @@ func newServer() *mcp.Server {
 
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "env_exec",
-		Description: "Run a shell command inside an environment over SSH and return its exit code and output. " +
+		Description: "Run a shell command inside an environment and return its exit code and output. " +
 			"The command is one shell string: pipes, redirects, globs and quoting are interpreted by the " +
 			"guest shell, unlike the CLI's `terrarium exec`, which passes its arguments literally. " +
 			"Which shell that is: /bin/sh on Linux guests; on a Windows guest, the shell recorded for its " +

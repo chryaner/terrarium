@@ -331,12 +331,12 @@ so you download the ISO once and terrarium runs the real installer unattended:
 3. `terrarium get win10`. Fully unattended: about ten minutes for win10, seven
    for XP.
 
-A win10 golden built from this version on comes out key-based like the Linux
-ones (older ones keep their password and cmd shell): the install generates
+A win10 golden comes out key-based like the Linux ones: the install generates
 an ed25519 pair, puts the public half in the guest and records the private
 one, so `ssh` and `scp` from the generated `~/.ssh/config` entry never prompt.
 Its SSH sessions land in PowerShell, so `exec` quotes for PowerShell rather
-than cmd.exe.
+than cmd.exe. A golden built by an older terrarium keeps its password and its
+cmd shell; re-run `terrarium get win10 --force` to rebuild it.
 
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,

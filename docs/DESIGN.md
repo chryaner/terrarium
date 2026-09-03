@@ -263,9 +263,8 @@ Hyper-V driver slots in without touching anything above it.
 
 Everything above assumes SSH, and SSH is still the default: it needs nothing
 installed by terrarium and works the same for every guest that has an sshd.
-Three field reports from the first weeks of use were about guests that do
-not, or commands that SSH cannot control once started, and this is what they
-changed.
+What follows is for the guests that have no sshd, and for the commands SSH
+cannot control once they have started.
 
 **Transports.** A golden carries a `transport`: blank or `ssh`, or
 `guestcontrol`, which runs commands through VirtualBox Guest Additions
@@ -287,14 +286,15 @@ an env, which costs one-letter env names their spec and nothing else.
 
 **Kill on timeout.** An SSH session cannot cancel what it started: closing it
 leaves the process running, and a Windows command that opened a dialog runs
-forever. So a command that may be killed is tagged with a marker the guest
-can see - a trailing comment in PowerShell and sh, `& rem trr:<id>` in cmd -
-and when the deadline passes a second session finds every process whose
-command line carries the marker and kills the tree (`taskkill /T`, or `pkill
--f`). The marker is the only handle that works across all three shells
-without an agent in the guest. The MCP server always kills: an agent cannot go
-and look at a hung process, so a leaked one is strictly worse than a killed
-one.
+forever. So a command that may be killed is tagged with a marker the guest can
+see - a trailing `# trr:<id>` comment in PowerShell and sh, a leading `set
+TRR_MARK=trr:<id> &` in cmd, which has no comment syntax and hands back the
+exit code of whatever ran last - and when the deadline passes a second session
+finds every process whose command line carries the marker and kills the tree
+(`taskkill /T`, or `pkill -f`). The marker is the only handle that works
+across all three shells without an agent in the guest. The MCP server always
+kills: an agent cannot go and look at a hung process, so a leaked one is
+strictly worse than a killed one.
 
 **Desktop mode.** SSH sessions on Windows run in session 0, where a window is
 invisible and a dialog blocks forever.

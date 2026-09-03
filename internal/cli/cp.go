@@ -15,8 +15,11 @@ var (
 var cpCmd = &cobra.Command{
 	Use:   "cp <src> <dst>",
 	Short: "Copy files between the host and an env",
-	Long: `Copies files over SFTP on the env's own SSH connection, with the credentials
-its golden already holds. Exactly one side is <env>:<path>:
+	Long: `Copies files the same way exec reaches the guest: SFTP on the env's own SSH
+connection, or Guest Additions on a golden adopted with --transport
+guestcontrol. Either way it uses the credentials the golden already holds.
+
+Exactly one side is <env>:<path>:
 
   terrarium cp ./build.tar t1:/tmp/build.tar    # host -> guest
   terrarium cp t1:/var/log/syslog ./syslog      # guest -> host
