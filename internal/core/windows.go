@@ -51,15 +51,17 @@ func isWindowsGuest(ostype string) bool {
 
 // GuestIsWindows reports whether an env's guest runs Windows, which decides
 // how a command's argv has to be quoted for its shell. The VM's own guest
-// type is the only answer available: golden records store no OS, a promoted
-// golden has no recipe at all, and a derived recipe's ostype says nothing
-// about its base - it defaults to Linux_64 even when that base is Windows.
+// type is the only answer available: a promoted golden has no recipe at all,
+// and a derived recipe's ostype says nothing about its base - it defaults to
+// Linux_64 even when that base is Windows. The type is read from the env
+// record, which fills itself from VirtualBox the first time, so a shell that
+// used to cost a VBoxManage call per exec now costs one ever.
 func (e *Engine) GuestIsWindows(envName string) (bool, error) {
 	env := e.St.Envs[envName]
 	if env == nil {
 		return false, fmt.Errorf("no env %q", envName)
 	}
-	ostype, err := e.VB.OSType(env.VMName)
+	ostype, err := e.osType(env.VMName, &env.OSType)
 	if err != nil {
 		return false, err
 	}

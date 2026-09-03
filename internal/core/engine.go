@@ -68,11 +68,18 @@ func (e *Engine) findVM(name string) (*vbox.VM, error) {
 	return nil, fmt.Errorf("no VirtualBox VM named %q", name)
 }
 
-// Adopt records an existing VM+snapshot as a golden image. Re-running
-// updates the record (e.g. to set SSH credentials later).
-func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapshot bool) (*Golden, error) {
+// Adopt records an existing VM+snapshot as a golden image. Re-running updates
+// the record, which is how credentials are set later: adopt credless, work out
+// the login through the console, adopt again with what worked. image names the
+// golden; empty means the VM's own name.
+func (e *Engine) Adopt(vmName, image, snapshot, user, password, key string, takeSnapshot bool) (*Golden, error) {
 	if !validSSHUser(user) {
 		return nil, fmt.Errorf("ssh user contains an illegal character")
+	}
+	if image == "" {
+		image = vmName
+	} else if !goldenNameRe.MatchString(image) {
+		return nil, fmt.Errorf("invalid golden name %q (letters, digits, dots, dashes)", image)
 	}
 	vm, err := e.findVM(vmName)
 	if err != nil {
@@ -93,14 +100,20 @@ func (e *Engine) Adopt(vmName, snapshot, user, password, key string, takeSnapsho
 			return nil, err
 		}
 	}
-	g := e.St.Goldens[vmName]
+	g := e.St.Goldens[image]
 	if g == nil {
 		g = &Golden{}
-		e.St.Goldens[vmName] = g
+		e.St.Goldens[image] = g
 	}
 	g.VMName = vmName
 	g.UUID = vm.UUID
 	g.Snapshot = snapshot
+	// Probed now so `ls` and `info` can say what this thing is - the reason
+	// adopt exists is that terrarium knows nothing else about the VM. A
+	// VirtualBox that will not answer is not worth failing the adopt over.
+	if ostype, err := e.VB.OSTypeID(vmName); err == nil {
+		g.OSType = ostype
+	}
 	if user != "" {
 		g.SSHUser = user
 	}
@@ -181,6 +194,10 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 		SSHPort: port,
 		Created: time.Now(),
 		Share:   opts.ShareHostPath,
+		// A clone runs the same guest as its golden, so the type is copied
+		// rather than probed again. Blank if the golden has none yet; the
+		// listing commands fill it in later.
+		OSType: g.OSType,
 	}
 	if opts.TTL > 0 {
 		env.Expires = env.Created.Add(opts.TTL)

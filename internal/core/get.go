@@ -369,6 +369,14 @@ func (e *Engine) recordGolden(image string, g *Golden, progress func(string)) (*
 	if vm, err := e.findVM(g.VMName); err == nil {
 		g.UUID = vm.UUID
 	}
+	// Read back rather than taken from the recipe: an imported appliance
+	// brings its own guest type, and an ISO build may have used the type
+	// detection rather than what the recipe said.
+	if g.OSType == "" {
+		if ostype, err := e.VB.OSTypeID(g.VMName); err == nil {
+			g.OSType = ostype
+		}
+	}
 	e.St.Goldens[image] = g
 	return g, e.St.Save()
 }

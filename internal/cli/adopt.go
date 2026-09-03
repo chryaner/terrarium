@@ -27,7 +27,7 @@ Re-running adopt updates the record, e.g. to set SSH credentials.`,
 		if err != nil {
 			return err
 		}
-		g, err := e.Adopt(args[0], adoptSnapshot, adoptUser, adoptPassword, adoptKey, adoptTake)
+		g, err := e.Adopt(args[0], "", adoptSnapshot, adoptUser, adoptPassword, adoptKey, adoptTake)
 		if err != nil {
 			return err
 		}
