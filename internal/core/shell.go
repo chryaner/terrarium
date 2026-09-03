@@ -95,7 +95,7 @@ func (e *Engine) ShellFor(envName string) (string, error) {
 	if g != nil && g.Shell != "" {
 		return g.Shell, nil
 	}
-	ostype, err := e.VB.OSType(env.VMName)
+	ostype, err := e.osType(env.VMName, &env.OSType)
 	if err != nil {
 		return "", err
 	}
