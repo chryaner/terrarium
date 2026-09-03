@@ -24,12 +24,14 @@ const guestRDPPort = 3389
 // reading the console output buffer" and turns a successful enable into exit 1.
 const enableRDPCmd = `powershell -Command "$ProgressPreference='SilentlyContinue'; Set-ItemProperty 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name fDenyTSConnections -Value 0; Enable-NetFirewallRule -Name RemoteDesktop-UserMode-In-TCP"`
 
-// runningEnv resolves an env that must be powered on. Everything in this file
-// talks to a live console.
+// runningEnv resolves an env that must be powered on. The input verbs below
+// are env-only on purpose: typing into a golden edits the image every future
+// fork is made from, and typing into a VM terrarium does not manage edits
+// something that is not ours.
 func (e *Engine) runningEnv(name string) (*Env, error) {
 	env := e.St.Envs[name]
 	if env == nil {
-		return nil, fmt.Errorf("no env %q", name)
+		return nil, fmt.Errorf("no env %q: input only goes to envs, so fork one first (`terrarium fork <golden> %s`)", name, name)
 	}
 	state, err := e.VB.VMState(env.VMName)
 	if err != nil {
@@ -41,14 +43,50 @@ func (e *Engine) runningEnv(name string) (*Env, error) {
 	return env, nil
 }
 
-// Screenshot captures the guest's screen to a PNG. This is the one way to see
-// a guest that has no SSH, so it deliberately needs nothing of the guest.
-func (e *Engine) Screenshot(envName, path string) error {
-	env, err := e.runningEnv(envName)
+// vmNameFor maps a screenshot target to a VirtualBox VM name. Envs come
+// first: an env and a golden may share a name, and the env is the disposable
+// one, so it is the safer thing to have resolved. Anything unrecorded is
+// taken as a VM name and left to VirtualBox to recognise or not.
+func vmNameFor(st *State, name string) string {
+	switch {
+	case st.Envs[name] != nil:
+		return st.Envs[name].VMName
+	case st.Goldens[name] != nil:
+		return st.Goldens[name].VMName
+	default:
+		return name
+	}
+}
+
+// runningVM resolves a screenshot target, which may be an env, a golden, or a
+// VirtualBox VM terrarium has never heard of. Reading a screen changes
+// nothing, so unlike the input verbs it is safe to point anywhere - and being
+// able to see a machine before adopting it is how you find out what it wants
+// you to type.
+func (e *Engine) runningVM(name string) (string, error) {
+	vmName := vmNameFor(e.St, name)
+	if _, err := e.findVM(vmName); err != nil {
+		return "", fmt.Errorf("no env, golden or VirtualBox VM named %q", name)
+	}
+	state, err := e.VB.VMState(vmName)
+	if err != nil {
+		return "", err
+	}
+	if state != "running" {
+		return "", fmt.Errorf("%s is not running (%s): start it first", name, state)
+	}
+	return vmName, nil
+}
+
+// Screenshot captures a guest's screen to a PNG. This is the one way to see a
+// guest that has no SSH, so it deliberately needs nothing of the guest, and
+// takes any running machine rather than only envs.
+func (e *Engine) Screenshot(name, path string) error {
+	vmName, err := e.runningVM(name)
 	if err != nil {
 		return err
 	}
-	return e.VB.ScreenshotPNG(env.VMName, path)
+	return e.VB.ScreenshotPNG(vmName, path)
 }
 
 // TypeText types into the guest's keyboard as if a person were at it. The
