@@ -94,8 +94,11 @@ func psQuote(s string) string {
 // cmd.exe, with both its streams captured to a file exec can read back, and
 // the marker that makes it killable. cmd.exe rather than the guest's own
 // shell because a task action is a command line, not a session.
+//
+// The marker goes inside the cmd /c argument, not around it: a task action is
+// a program plus arguments, and `set` is not a program.
 func desktopTaskAction(command, outFile, id string) string {
-	return MarkCommand(ShellCmd, "cmd /c "+command+" > "+outFile+" 2>&1", id)
+	return "cmd /c " + MarkCommand(ShellCmd, command+" > "+outFile+" 2>&1", id)
 }
 
 // desktopCreateScript registers the task and starts it. /IT puts it in the

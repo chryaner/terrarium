@@ -22,10 +22,10 @@ func TestMarkCommand(t *testing.T) {
 			ShellPowerShell, "Start-Sleep 300", "Start-Sleep 300 # trr:abc123",
 		},
 		{
-			// cmd has no comment syntax inside a command line, and & runs rem
-			// whatever the first command exited with.
-			"cmd needs a separator and a command",
-			ShellCmd, "notepad", "notepad & rem trr:abc123",
+			// The marker goes first: last, it would be the command whose exit
+			// code cmd /c hands back.
+			"cmd marks in front, with a command the parser splits on",
+			ShellCmd, "notepad", "set TRR_MARK=trr:abc123 & notepad",
 		},
 		{
 			// Bare, a login shell execs the command and the marker goes with
@@ -114,5 +114,50 @@ func TestKilledError(t *testing.T) {
 	empty := (&KilledError{Timeout: time.Second, Command: "x"}).Error()
 	if !strings.Contains(empty, "already exited") {
 		t.Errorf("an empty kill should say so: %s", empty)
+	}
+}
+
+// A marker that changes what a command exits with is worse than no marker:
+// MCP marks every command on a cmd guest, and --desktop marks every task, so
+// a failing command would silently report success. Verified against cmd.exe:
+// `cmd /c "dir /b nosuchfile & rem x"` exits 0, and the same line without the
+// marker exits 1.
+func TestMarkCommandLeavesTheCommandLast(t *testing.T) {
+	for _, shell := range []string{ShellCmd, ShellPowerShell, ShellPOSIX} {
+		marked := MarkCommand(shell, "failing-command", "abc123")
+		switch shell {
+		case ShellCmd:
+			// Nothing may run after the command, because cmd /c reports what
+			// the last one exited with.
+			if !strings.HasSuffix(marked, "failing-command") {
+				t.Errorf("%s: the command is not last, so its exit code is lost: %s", shell, marked)
+			}
+			if strings.Contains(marked, "rem") {
+				t.Errorf("%s: rem cannot carry this marker - last it eats the exit code, first it eats the command: %s", shell, marked)
+			}
+		default:
+			// A comment is not a command, so these two keep it at the end.
+			if !strings.Contains(marked, "failing-command") {
+				t.Errorf("%s: the command went missing: %s", shell, marked)
+			}
+		}
+		if !strings.Contains(marked, "trr:abc123") {
+			t.Errorf("%s: the marker is not on the command line: %s", shell, marked)
+		}
+	}
+}
+
+// A process that ignores SIGTERM is still running, and reporting it as killed
+// is the one thing kill-on-timeout must not do.
+func TestPOSIXKillEscalates(t *testing.T) {
+	script, _ := KillScript(ShellPOSIX, "abc123")
+	if !strings.Contains(script, "kill -s TERM") || !strings.Contains(script, "kill -s KILL") {
+		t.Errorf("the POSIX kill does not escalate past TERM:\n%s", script)
+	}
+	if !strings.Contains(script, "ignored SIGTERM") {
+		t.Errorf("a process that needed SIGKILL is not reported as such:\n%s", script)
+	}
+	if strings.Index(script, "kill -s TERM") > strings.Index(script, "kill -s KILL") {
+		t.Errorf("KILL comes before TERM, so nothing gets the chance to clean up:\n%s", script)
 	}
 }

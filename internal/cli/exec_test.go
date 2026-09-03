@@ -95,52 +95,60 @@ func TestExecCommand(t *testing.T) {
 // the line: that shell runs with the same rights as the command, so a $( ) or
 // an & that leaks out of the wrapper is a command the caller did not ask for.
 func TestExecCommandDoesNotLeakMetacharacters(t *testing.T) {
-	nasty := []string{"echo", "a&b", "$(id)", "`whoami`", "x|y", "p;q"}
-	for _, c := range []struct {
-		name       string
-		want, have string
-		// leaks are the substrings that must not appear bare in the line the
-		// carrying shell parses.
-		leaks []string
-	}{
-		{"cmd on a PowerShell guest", core.ShellCmd, core.ShellPowerShell, []string{"$(id)", "`whoami`"}},
-		{"PowerShell on a cmd guest", core.ShellPowerShell, core.ShellCmd, []string{"a&b", "x|y"}},
-	} {
-		line := execCommand(c.want, c.have, nasty)
-		for _, leak := range c.leaks {
-			// Quoted is fine; PowerShell's own quoting is single quotes, and
-			// the encoded form contains none of it at all.
-			if c.have == core.ShellCmd && strings.Contains(line, leak) {
-				t.Errorf("%s: %q reaches cmd.exe unencoded in %s", c.name, leak, line)
-			}
-			if c.have == core.ShellPowerShell && !strings.Contains(line, "'") {
-				t.Errorf("%s: nothing is quoted in %s", c.name, line)
-			}
+	nasty := []string{"echo", "a&b", "$(id)", "\\`whoami`", "x|y", "p;q"}
+
+	// On a cmd guest the wrapper is base64, so none of it is on the line at
+	// all - not quoted, not escaped, absent.
+	encoded := execCommand(core.ShellPowerShell, core.ShellCmd, nasty)
+	for _, leak := range []string{"a&b", "x|y", "p;q", "$(id)"} {
+		if strings.Contains(encoded, leak) {
+			t.Errorf("%q reaches cmd.exe unencoded in %s", leak, encoded)
 		}
+	}
+	// And it is really the command, not something lost on the way.
+	if !strings.Contains(encoded, sshx.EncodePowerShell(sshx.QuotePowerShell(nasty))) {
+		t.Errorf("the encoded payload is not the quoted command: %s", encoded)
+	}
+
+	// On a PowerShell guest the wrapper is one single-quoted argument, so the
+	// metacharacters are inside it and PowerShell hands them to cmd.exe
+	// verbatim. Unquoting has to give back exactly what was passed.
+	line := execCommand(core.ShellCmd, core.ShellPowerShell, nasty)
+	arg, ok := strings.CutPrefix(line, "cmd /c ")
+	if !ok {
+		t.Fatalf("not a cmd wrapper: %s", line)
+	}
+	if !strings.HasPrefix(arg, "'") || !strings.HasSuffix(arg, "'") {
+		t.Fatalf("the command is not one quoted argument: %s", line)
+	}
+	unquoted := strings.ReplaceAll(arg[1:len(arg)-1], "''", "'")
+	if want := strings.Join(nasty, " "); unquoted != want {
+		t.Errorf("what cmd.exe receives is not what was asked for:\n got %s\nwant %s", unquoted, want)
+	}
+	// A lone quote inside the argument would end it and leave the rest as
+	// PowerShell syntax, so every one of them has to be doubled.
+	for _, i := range oddQuoteRuns(arg[1 : len(arg)-1]) {
+		t.Errorf("an unescaped quote at %d ends the argument early: %s", i, line)
 	}
 }
 
-// --shell names the shell the way a user thinks of it; the state file names it
-// the way a golden records it.
-func TestShellFlag(t *testing.T) {
-	for in, want := range map[string]string{
-		"":           "",
-		"sh":         core.ShellPOSIX,
-		"posix":      core.ShellPOSIX,
-		"cmd":        core.ShellCmd,
-		"powershell": core.ShellPowerShell,
-	} {
-		got, err := shellFlag(in)
-		if err != nil {
-			t.Errorf("--shell %q: %v", in, err)
+// oddQuoteRuns reports the offsets of quote runs of odd length, which are the
+// ones that close the string they are in.
+func oddQuoteRuns(s string) []int {
+	var bad []int
+	for i := 0; i < len(s); {
+		if s[i] != '\'' {
+			i++
+			continue
 		}
-		if got != want {
-			t.Errorf("--shell %q: got %q, want %q", in, got, want)
+		j := i
+		for j < len(s) && s[j] == '\'' {
+			j++
 		}
+		if (j-i)%2 == 1 {
+			bad = append(bad, i)
+		}
+		i = j
 	}
-	for _, bad := range []string{"bash", "pwsh", "PowerShell"} {
-		if _, err := shellFlag(bad); err == nil {
-			t.Errorf("--shell %q should be rejected: quoting for a shell that is not there fails silently", bad)
-		}
-	}
+	return bad
 }

@@ -66,9 +66,14 @@ func TestParseTaskQuery(t *testing.T) {
 // the marker that makes a timeout killable.
 func TestDesktopTaskAction(t *testing.T) {
 	got := desktopTaskAction("notepad", `C:\Windows\Temp\trr-1.out`, "abc123")
-	want := `cmd /c notepad > C:\Windows\Temp\trr-1.out 2>&1 & rem trr:abc123`
+	want := `cmd /c set TRR_MARK=trr:abc123 & notepad > C:\Windows\Temp\trr-1.out 2>&1`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+	// cmd /c reports what its last command exited with, so nothing of ours
+	// may run after the caller's.
+	if !strings.HasSuffix(got, "2>&1") {
+		t.Errorf("something runs after the command, so its exit code is lost: %s", got)
 	}
 }
 

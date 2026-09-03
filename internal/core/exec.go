@@ -65,7 +65,9 @@ func (e *Engine) Exec(ctx context.Context, r ExecRequest) (int, error) {
 	code, err := e.Run(ctx, r.Env, r.Timeout, command, r.Stdin, r.Stdout, r.Stderr)
 	var timedOut *sshx.TimeoutError
 	if id != "" && errors.As(err, &timedOut) {
-		return code, e.killMarked(r.Env, r.GuestShell, id, r.Timeout, command)
+		// r.Command, not the marked line: the marker is bookkeeping and
+		// reads like a typo in an error message.
+		return code, e.killMarked(r.Env, r.GuestShell, id, r.Timeout, r.Command)
 	}
 	return code, err
 }

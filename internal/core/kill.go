@@ -18,6 +18,9 @@ import (
 // recognise the tag in the guest's process table from a second session.
 const (
 	markerPrefix = "trr:"
+	// markerVar is only somewhere for a cmd guest's marker to sit on the
+	// command line. Nothing reads it.
+	markerVar = "TRR_MARK"
 	// killTimeout bounds the second session. Finding and killing a process is
 	// fast, and a kill that hangs would hide the timeout that caused it.
 	killTimeout = 60 * time.Second
@@ -49,9 +52,16 @@ func MarkCommand(shell, command, id string) string {
 	marker := markerPrefix + id
 	switch shell {
 	case ShellCmd:
-		// cmd.exe has no comment inside a command line. `rem` is a command, so
-		// it needs a separator, and & runs it whatever came before exited.
-		return command + " & rem " + marker
+		// The marker goes first here, and it is a `set` rather than a comment.
+		// cmd.exe has no comment inside a command line, and `rem` last would be
+		// the command whose status cmd /c returns, so a failing command would
+		// come back 0 - which is every MCP exec on a cmd guest, where the marker
+		// is unconditional. Nor can rem go first: `rem x & cmd` comments the
+		// command out, and `(rem x) & cmd` does not parse at all, because rem
+		// swallows the closing paren. `set` is an ordinary command the parser
+		// splits on & like any other, so the caller's command stays last and its
+		// exit code is what comes back.
+		return "set " + markerVar + "=" + marker + " & " + command
 	case ShellPowerShell:
 		return command + " # " + marker
 	default:
@@ -70,11 +80,25 @@ func MarkCommand(shell, command, id string) string {
 // it too, which is the session reading the answer.
 func KillScript(shell, id string) (script, scriptShell string) {
 	if shell == ShellPOSIX {
-		// The marked shell leads its process group, so the group kill takes
-		// its children; the plain kill is for the case where it does not.
-		return "pgrep -af 'trr'':" + id + "' | while read -r p rest; do\n" +
+		// TERM first, because a process given the chance to clean up usually
+		// takes it, then KILL for one that ignored it - and that is reported,
+		// because "killed" has to mean killed. The marked shell leads its
+		// process group, so the group kill takes its children with it; the
+		// plain kill covers the case where it leads none.
+		pat := "'trr'':" + id + "'"
+		return "found=$(pgrep -af " + pat + ")\n" +
+			"[ -n \"$found\" ] || exit 0\n" +
+			"echo \"$found\" | while read -r p rest; do\n" +
 			"  kill -s TERM -- \"-$p\" 2>/dev/null || kill -s TERM \"$p\" 2>/dev/null\n" +
-			"  echo \"$p $rest\"\n" +
+			"done\n" +
+			"sleep 2\n" +
+			"echo \"$found\" | while read -r p rest; do\n" +
+			"  if kill -0 \"$p\" 2>/dev/null; then\n" +
+			"    kill -s KILL -- \"-$p\" 2>/dev/null || kill -s KILL \"$p\" 2>/dev/null\n" +
+			"    echo \"$p $rest (ignored SIGTERM, killed)\"\n" +
+			"  else\n" +
+			"    echo \"$p $rest\"\n" +
+			"  fi\n" +
 			"done\n", ShellPOSIX
 	}
 	// taskkill /T is what makes this a tree kill: the marker is on the shell
@@ -111,6 +135,10 @@ func (e *KilledError) Error() string {
 		e.Timeout, e.Command, e.Killed)
 }
 
+// command is what the caller asked to run, not the marked line it was sent
+// as: the marker is bookkeeping, and showing it only makes the reader wonder
+// what they typed wrong.
+//
 // killMarked opens a second session and kills whatever the marker still names.
 // A failed kill keeps the timeout as the reported cause: the command not
 // finishing is the thing the caller asked about, and the cleanup failing is
