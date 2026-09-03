@@ -51,11 +51,10 @@ func (e *Engine) getDerived(r recipe.Recipe, image string, cpus, memMB int, forc
 	progress(fmt.Sprintf("forking %s to run setup in", r.From))
 	// A failed fork rolls itself back, so there is no scratch env left to hint
 	// about here. A failed setup below is a different matter: that env is kept.
-	env, err := e.Fork(r.From, scratch, ForkOpts{CPUs: cpus, MemMB: memMB}, progress)
-	if err != nil {
+	if _, err := e.Fork(r.From, scratch, ForkOpts{CPUs: cpus, MemMB: memMB}, progress); err != nil {
 		return nil, err
 	}
-	if err := e.runSetup(r, env, progress); err != nil {
+	if err := e.runSetup(r, scratch, progress); err != nil {
 		return nil, fmt.Errorf("%w\n%s was left for inspection: `terrarium ssh %s`, then `terrarium rm %s`",
 			err, scratch, scratch, scratch)
 	}
@@ -79,14 +78,14 @@ func scratchName(image string) string {
 // runSetup executes the recipe's commands in order, each with its own
 // timeout. Output is buffered rather than streamed: on success it is noise,
 // on failure its tail is the diagnosis.
-func (e *Engine) runSetup(r recipe.Recipe, env *Env, progress func(string)) error {
-	g := e.St.Goldens[env.Golden]
+func (e *Engine) runSetup(r recipe.Recipe, envName string, progress func(string)) error {
 	timeout := time.Duration(r.SetupTimeoutMin) * time.Minute
 	for i, cmd := range r.Setup {
 		progress(fmt.Sprintf("setup %d/%d: %s", i+1, len(r.Setup), cmd))
 		var out sshx.OutputBuffer
-		code, err := sshx.ExecTimeout(context.Background(), timeout, env.SSHPort,
-			g.SSHUser, g.SSHPassword, g.SSHKey, cmd, &out, &out)
+		// Through Run, so a base golden on the guestcontrol transport builds
+		// derived images the same way an SSH one does.
+		code, err := e.Run(context.Background(), envName, timeout, cmd, nil, &out, &out)
 		if err != nil {
 			return fmt.Errorf("setup %d/%d (%s): %w", i+1, len(r.Setup), cmd, err)
 		}

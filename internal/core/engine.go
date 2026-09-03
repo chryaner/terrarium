@@ -72,12 +72,20 @@ func (e *Engine) findVM(name string) (*vbox.VM, error) {
 // the record, which is how credentials are set later: adopt credless, work out
 // the login through the console, adopt again with what worked. image names the
 // golden; empty means the VM's own name.
-func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell string, takeSnapshot bool) (*Golden, error) {
+func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell, transport string, takeSnapshot bool) (*Golden, error) {
 	if !validSSHUser(user) {
 		return nil, fmt.Errorf("ssh user contains an illegal character")
 	}
 	if shell != "" && !ValidShell(shell) {
 		return nil, fmt.Errorf("unknown shell %q: one of %s", shell, strings.Join(Shells, ", "))
+	}
+	if transport != "" && !ValidTransport(transport) {
+		return nil, fmt.Errorf("unknown transport %q: one of %s", transport, strings.Join(Transports, ", "))
+	}
+	// Guest Additions have no key auth and no way to ask for one, so a record
+	// that cannot log in is worth refusing here rather than at the first exec.
+	if transport == TransportGuestControl && user != "" && password == "" {
+		return nil, fmt.Errorf("the guestcontrol transport authenticates with a password: pass --password as well as --user")
 	}
 	if image == "" {
 		// A VM already recorded under a golden name is that golden: a second
@@ -133,6 +141,9 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell strin
 	}
 	if key != "" {
 		g.SSHKey = key
+	}
+	if transport != "" {
+		g.Transport = transport
 	}
 	switch {
 	case shell != "":
@@ -320,7 +331,11 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 	if err := e.VB.StartHeadless(vmName); err != nil {
 		return err
 	}
-	if g.hasCreds() {
+	if TransportOf(g) == TransportGuestControl {
+		if err := e.waitGuestControl(env, g, progress); err != nil {
+			return err
+		}
+	} else if g.hasCreds() {
 		if err := sshx.WaitReady(env.SSHPort, bootTimeout); err != nil {
 			return err
 		}
@@ -418,7 +433,11 @@ func (e *Engine) Start(name string, progress func(string)) (*Env, error) {
 // has no sshd to wait for and returns at once - it is driven through the
 // console instead.
 func (e *Engine) waitReady(env *Env, progress func(string)) error {
-	if !e.St.Goldens[env.Golden].hasCreds() {
+	g := e.St.Goldens[env.Golden]
+	if TransportOf(g) == TransportGuestControl {
+		return e.waitGuestControl(env, g, progress)
+	}
+	if !g.hasCreds() {
 		progress(credlessNote)
 		return nil
 	}

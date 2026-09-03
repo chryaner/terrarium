@@ -223,6 +223,10 @@ whose VM you deleted by hand).
   under that shell instead of the one the guest's sshd would pick.
 - `exec <env> --stdin` reads a whole script from stdin and runs it in the
   guest, so nothing in it needs escaping.
+- `exec <env> --kill-on-timeout` kills the command and its children in the
+  guest when the timeout fires, instead of leaving it running unwatched.
+- `exec <env> --desktop` runs it in the logged-in session of a Windows guest,
+  so a window or a dialog it opens is on the screen `screenshot` shows.
 
 Running terrarium from git-bash? MSYS rewrites absolute paths in arguments
 (`/etc/hosts` becomes `C:/Program Files/Git/etc/hosts`) before terrarium ever
@@ -286,7 +290,11 @@ than cmd.exe.
 
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
-and its recipe needs a product key you supply in a local override. Recipe
+and its recipe needs a product key you supply in a local override.
+`adopt --transport guestcontrol --user <u> --password <pw>` reaches a Windows
+with no SSH server through VirtualBox Guest Additions instead, if they are
+installed in it, and `exec`, `cp` and the MCP tools then work on its forks.
+Recipe
 details, private mirrors and the unattended-install internals are in
 [docs/DESIGN.md](docs/DESIGN.md).
 

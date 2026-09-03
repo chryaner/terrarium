@@ -41,6 +41,13 @@ no credentials, so tell the user to record them with
 ` + "`terrarium adopt <vm> --user <user> [--password <pw> | --key <path>]`" + ` in the
 CLI before env_exec will work on its forks.
 
+A Windows guest with no SSH server - anything older than Windows 10 - is
+reachable a third way when VirtualBox Guest Additions are installed in it:
+golden_adopt it with transport "guestcontrol" plus the guest's user and
+password, and env_exec, env_push and env_pull then work on its forks. Without
+Guest Additions there is no transport at all, and the console tools are the
+only way in.
+
 Golden images are the opposite: durable, disk-heavy, and owned by the user.
 Nothing here removes one - that is the user's call, via terrarium rm --golden
 in the CLI - so create one (golden_get, golden_import, env_promote) only when
@@ -173,6 +180,11 @@ func newServer() *mcp.Server {
 			"quoted - a script reaches the shell on stdin, so nothing in it is re-parsed on the way. " +
 			"The environment must be running. Commands run as a user with passwordless sudo, so this can " +
 			"change or destroy anything inside the guest - the host is not affected. " +
+			"A command that outruns timeout_sec is killed in the guest, with its child processes, and the " +
+			"error says what was killed: nothing is left running where you cannot see it. " +
+			"On a Windows guest an ordinary command runs in session 0, which has no screen: if it opens a " +
+			"window or a dialog it waits there forever and env_screenshot shows nothing. Set desktop to run " +
+			"it in the session a user is logged into instead, where env_screenshot can see what it wants. " +
 			"Only works when the environment's golden has SSH credentials; without them, use " +
 			"env_screenshot, env_type, env_keys and env_click.",
 	}, envExec)

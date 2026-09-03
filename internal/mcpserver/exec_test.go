@@ -62,8 +62,20 @@ func TestExecRequest(t *testing.T) {
 			"sh -s", "id",
 		},
 		{
+			// The wrapper is quoted for the guest's own shell, which parses
+			// the line before cmd.exe is started at all.
 			"cmd has no stdin mode, so its command line is wrapped instead",
 			envExecInput{Command: "dir /b", Shell: "cmd"}, core.ShellPowerShell,
+			"cmd /c 'dir /b'", "",
+		},
+		{
+			"a cmd command is not left for PowerShell to expand",
+			envExecInput{Command: "echo $env:USERNAME & whoami", Shell: "cmd"}, core.ShellPowerShell,
+			"cmd /c 'echo $env:USERNAME & whoami'", "",
+		},
+		{
+			"a cmd guest reads the cmd line itself, so it goes over as typed",
+			envExecInput{Command: "dir /b", Shell: "cmd"}, core.ShellCmd,
 			"cmd /c dir /b", "",
 		},
 	}
@@ -101,5 +113,10 @@ func TestExecRequestRejections(t *testing.T) {
 	failing := func() (string, error) { return "", errors.New("vm is off") }
 	if _, _, err := execRequest(envExecInput{Script: "id\n"}, failing); err == nil {
 		t.Error("an unreachable guest should fail rather than guess a shell")
+	}
+	// Same for the cmd wrapper: which shell carries the line decides how that
+	// line has to be quoted, so an unknown one cannot be guessed at either.
+	if _, _, err := execRequest(envExecInput{Command: "dir", Shell: "cmd"}, failing); err == nil {
+		t.Error("an unreachable guest should fail rather than guess how to quote")
 	}
 }

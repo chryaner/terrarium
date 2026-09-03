@@ -40,6 +40,55 @@ func ScriptCommand(shell string) string {
 	return "powershell -NoProfile -NonInteractive -Command -"
 }
 
+// The two ways to hand PowerShell a command on a command line. -Command takes
+// it as text, which only works where nothing re-parses that text on the way;
+// -EncodedCommand takes base64, which survives anything.
+const (
+	psCommandPrefix = "powershell -NoProfile -NonInteractive -Command "
+	psEncodedPrefix = "powershell -NoProfile -NonInteractive -EncodedCommand "
+)
+
+// LaunchCmd builds the line that runs cmdLine under cmd.exe. have is the shell
+// sshd hands the whole line to, and it parses the line before cmd.exe sees any
+// of it: on a PowerShell guest an unquoted `cmd /c echo $env:USERNAME` is
+// expanded by PowerShell first, and a $(...) or ; in the command runs there
+// rather than in cmd. So the line crosses as one quoted argument.
+func LaunchCmd(have, cmdLine string) string {
+	switch have {
+	case ShellPowerShell:
+		return "cmd /c " + sshx.QuotePowerShellArg(cmdLine)
+	case ShellPOSIX:
+		return "cmd /c " + sshx.QuotePOSIXArg(cmdLine)
+	default:
+		// A cmd guest is the one case with nothing to quote against: cmd.exe
+		// has no quoting that rebuilds a command line, and it is also the
+		// parser the line is written for, so it goes over as typed.
+		return "cmd /c " + cmdLine
+	}
+}
+
+// LaunchPowerShell builds the line that runs psCommand under PowerShell.
+// Anywhere but a PowerShell guest that means -EncodedCommand: cmd.exe splits
+// on & and | inside single quotes, double quotes and carets alike, so a
+// quoted PowerShell command line handed to a cmd guest runs half in cmd.
+func LaunchPowerShell(have, psCommand string) string {
+	if have == ShellPowerShell {
+		return psCommandPrefix + psCommand
+	}
+	return psEncodedPrefix + sshx.EncodePowerShell(psCommand)
+}
+
+// LaunchSh builds the line that runs shLine under a POSIX shell. On a
+// PowerShell guest the whole script is one PowerShell argument; anywhere else
+// POSIX quoting is what reads it, which is also what a cmd guest passes
+// through untouched.
+func LaunchSh(have, shLine string) string {
+	if have == ShellPowerShell {
+		return "sh -c " + sshx.QuotePowerShellArg(shLine)
+	}
+	return sshx.QuotePOSIX([]string{"sh", "-c", shLine})
+}
+
 // shellProbe asks a Windows guest which shell it dropped the session into.
 // cmd.exe expands %COMSPEC% to its own path; PowerShell has no % expansion
 // and echoes the word back untouched.
@@ -99,17 +148,25 @@ func (e *Engine) ShellFor(envName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	shell := probeShell(ostype, func() (string, error) {
-		port, user, password, key, err := e.SSHTarget(envName)
-		if err != nil {
-			return "", err
+	// Nothing to probe on the guestcontrol transport: Guest Additions start a
+	// program rather than a session, so there is no shell for the guest to be
+	// asked about - the record is what decides which one gets launched. Asking
+	// anyway would also recurse, since running the probe goes through here.
+	var ask func() (string, error)
+	if TransportOf(g) == TransportSSH {
+		ask = func() (string, error) {
+			port, user, password, key, err := e.SSHTarget(envName)
+			if err != nil {
+				return "", err
+			}
+			var out sshx.OutputBuffer
+			if _, err := sshx.ExecStreams(port, user, password, key, shellProbe, &out, io.Discard); err != nil {
+				return "", err
+			}
+			return out.String(), nil
 		}
-		var out sshx.OutputBuffer
-		if _, err := sshx.ExecStreams(port, user, password, key, shellProbe, &out, io.Discard); err != nil {
-			return "", err
-		}
-		return out.String(), nil
-	})
+	}
+	shell := probeShell(ostype, ask)
 	if shell == "" {
 		// Every Windows golden built before the post-install set DefaultShell
 		// runs cmd, and cmd is the quoting exec has always used there, so an

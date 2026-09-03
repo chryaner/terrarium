@@ -9,13 +9,14 @@ import (
 )
 
 var (
-	adoptName     string
-	adoptSnapshot string
-	adoptUser     string
-	adoptPassword string
-	adoptKey      string
-	adoptTake     bool
-	adoptShell    string
+	adoptName      string
+	adoptSnapshot  string
+	adoptUser      string
+	adoptPassword  string
+	adoptKey       string
+	adoptTake      bool
+	adoptShell     string
+	adoptTransport string
 )
 
 var adoptCmd = &cobra.Command{
@@ -38,14 +39,19 @@ that key - adopt installs nothing in the VM.
 --shell says what an SSH session lands in, which decides how exec quotes a
 command. Linux guests are settled by their guest type; a Windows one is asked
 on the first exec (cmd.exe and PowerShell answer differently), and --shell
-skips that round trip or corrects it.`,
+skips that round trip or corrects it.
+
+--transport guestcontrol reaches the guest through VirtualBox Guest Additions
+instead of SSH, for a Windows too old to have an SSH server. It needs --user
+and --password - Guest Additions have no key auth - and it is slower than SSH,
+so it is worth using only where SSH is not an option.`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e, err := core.NewEngine()
 		if err != nil {
 			return err
 		}
-		g, err := e.Adopt(args[0], adoptName, adoptSnapshot, adoptUser, adoptPassword, adoptKey, adoptShell, adoptTake)
+		g, err := e.Adopt(args[0], adoptName, adoptSnapshot, adoptUser, adoptPassword, adoptKey, adoptShell, adoptTransport, adoptTake)
 		if err != nil {
 			return err
 		}
@@ -70,5 +76,6 @@ func init() {
 	adoptCmd.Flags().StringVar(&adoptKey, "key", "", "SSH private key path")
 	adoptCmd.Flags().BoolVar(&adoptTake, "take-snapshot", false, "create the snapshot if it does not exist")
 	adoptCmd.Flags().StringVar(&adoptShell, "shell", "", "shell an SSH session lands in: "+strings.Join(core.Shells, ", "))
+	adoptCmd.Flags().StringVar(&adoptTransport, "transport", "", "how to reach the guest: "+strings.Join(core.Transports, ", ")+" (default ssh)")
 	rootCmd.AddCommand(adoptCmd)
 }

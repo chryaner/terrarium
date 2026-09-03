@@ -1,8 +1,10 @@
 package sshx
 
 import (
+	"encoding/base64"
 	"regexp"
 	"strings"
+	"unicode/utf16"
 )
 
 // safeArg matches the argv elements a POSIX shell hands on untouched. Those
@@ -68,4 +70,27 @@ func quotePSArg(a string) string {
 		return a
 	}
 	return "'" + strings.ReplaceAll(a, "'", "''") + "'"
+}
+
+// QuotePowerShellArg quotes one whole string as a single PowerShell argument.
+// It is for the wrappers that build a command line by hand - `cmd /c <line>` -
+// where the line is one argument to a program, not an argv PowerShell should
+// re-split.
+func QuotePowerShellArg(a string) string { return quotePSArg(a) }
+
+// QuotePOSIXArg is QuotePowerShellArg for a POSIX shell.
+func QuotePOSIXArg(a string) string { return quoteArg(a) }
+
+// EncodePowerShell encodes a command for `powershell -EncodedCommand`:
+// UTF-16LE, then base64. It is the only way to hand PowerShell a command
+// through a shell that parses the line first and cannot be quoted out of it -
+// cmd.exe splits on & and | inside every quoting it has. Base64 has neither,
+// nor a space, quote or dollar, so the line survives any shell on the way.
+func EncodePowerShell(command string) string {
+	units := utf16.Encode([]rune(command))
+	b := make([]byte, 0, len(units)*2)
+	for _, u := range units {
+		b = append(b, byte(u), byte(u>>8))
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }

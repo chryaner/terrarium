@@ -24,15 +24,22 @@ import (
 // not good enough for something that decides whether the golden is reachable,
 // so it is created here too and failure to create it is ignored.
 //
-// It does three things past starting sshd. PowerShell becomes the SSH default
+// It does four things past starting sshd. PowerShell becomes the SSH default
 // shell, so a command sent to the guest needs one layer of quoting instead of
 // cmd.exe's three. The generated public key goes into
 // administrators_authorized_keys - the file sshd's stock config reads for
 // members of the administrators group - so a Windows golden is key-based like
 // the Linux ones and plain ssh and scp work from the generated ssh-config
-// without a password prompt. And that file's ACL is reset to Administrators
-// and SYSTEM: sshd ignores it, silently, if anyone else can write it.
-func windowsPostInstall(pubKey string) string {
+// without a password prompt. That file's ACL is reset to Administrators and
+// SYSTEM: sshd ignores it, silently, if anyone else can write it.
+//
+// And Winlogon is told to log the account in by itself. An SSH command lands
+// in session 0, which has no desktop, so `exec --desktop` and `screenshot`
+// need a session someone is logged into - and a fork nobody has typed a
+// password into has none. The password is written to the registry in clear,
+// which is what AutoAdminLogon is; it is the same throwaway password already
+// stored in plain text on the golden record, in a disposable VM.
+func windowsPostInstall(pubKey, user, password string) string {
 	return `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
 		`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
 		`Set-Service -Name sshd -StartupType Automatic; ` +
@@ -42,6 +49,10 @@ func windowsPostInstall(pubKey string) string {
 		`$k = 'HKLM:\SOFTWARE\OpenSSH'; ` +
 		`if (-not (Test-Path $k)) { New-Item -Path $k -Force }; ` +
 		`New-ItemProperty -Path $k -Name DefaultShell -Value '` + windowsDefaultShell + `' -PropertyType String -Force; ` +
+		`$w = '` + winlogonKey + `'; ` +
+		`Set-ItemProperty -Path $w -Name AutoAdminLogon -Value '1'; ` +
+		`Set-ItemProperty -Path $w -Name DefaultUserName -Value '` + psLiteral(user) + `'; ` +
+		`Set-ItemProperty -Path $w -Name DefaultPassword -Value '` + psLiteral(password) + `'; ` +
 		`$d = Join-Path $env:ProgramData ssh; ` +
 		`New-Item -Path $d -ItemType Directory -Force; ` +
 		`$a = Join-Path $d administrators_authorized_keys; ` +
@@ -49,6 +60,16 @@ func windowsPostInstall(pubKey string) string {
 		// SIDs, not names: the builtin groups are localised on non-English Windows.
 		`icacls $a /inheritance:r /grant *S-1-5-32-544:F /grant *S-1-5-18:F"`
 }
+
+// winlogonKey holds the automatic-logon settings. Spelled out rather than
+// composed: VirtualBox pastes this command into a batch file, where a %
+// would be eaten before PowerShell saw it.
+const winlogonKey = `HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`
+
+// psLiteral escapes a value for the single-quoted PowerShell string it is
+// pasted into. A quote is the only thing single quotes cannot carry, and it is
+// written twice to spell itself.
+func psLiteral(s string) string { return strings.ReplaceAll(s, "'", "''") }
 
 // windowsDefaultShell is what sshd hands an exec request to once the
 // post-install has pointed it there. Windows PowerShell rather than pwsh: it
@@ -210,7 +231,7 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, goldens
 		if err != nil {
 			return nil, err
 		}
-		postCmd = windowsPostInstall(pubKey)
+		postCmd = windowsPostInstall(pubKey, r.User, r.Password)
 	}
 
 	progress(fmt.Sprintf("unattended install, up to %d min (once per image; forks are seconds)", r.InstallTimeoutMin))

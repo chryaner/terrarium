@@ -242,6 +242,7 @@ type goldenAdoptInput struct {
 	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
 	Key          string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
 	Shell        string `json:"shell,omitempty" jsonschema:"what an SSH session lands in: posix, cmd or powershell; Windows guests are probed on first exec when unset"`
+	Transport    string `json:"transport,omitempty" jsonschema:"how to reach the guest: ssh (default), or guestcontrol for a Windows with no SSH server, which talks through VirtualBox Guest Additions and needs user and password"`
 	TakeSnapshot bool   `json:"take_snapshot,omitempty" jsonschema:"create the snapshot if the VM does not have it yet; this modifies the user's VM"`
 }
 
@@ -250,7 +251,7 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.TakeSnapshot)
+	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.Transport, in.TakeSnapshot)
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
@@ -467,6 +468,7 @@ type envExecInput struct {
 	Script     string `json:"script,omitempty" jsonschema:"multi-line script to run instead of command; it reaches the shell on stdin so nothing in it is quoted or split"`
 	Shell      string `json:"shell,omitempty" jsonschema:"run under this shell instead of the guest's own: powershell, cmd or sh"`
 	TimeoutSec int    `json:"timeout_sec,omitempty" jsonschema:"seconds to wait before giving up (default 300)"`
+	Desktop    bool   `json:"desktop,omitempty" jsonschema:"Windows guests only: run in the session a user is logged into, so env_screenshot shows the window or dialog the command opens. Without it a command runs in session 0, which has no screen"`
 }
 
 type envExecOutput struct {
@@ -479,11 +481,14 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	port, user, password, key, err := e.SSHTarget(in.Name)
+	// Needed for every call now, not only the ones that name a shell: the
+	// marker that makes a timed-out command killable is spelled differently
+	// per shell, and it has to survive that shell's parser.
+	guest, err := e.ShellFor(in.Name)
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	command, stdin, err := execRequest(in, func() (string, error) { return e.ShellFor(in.Name) })
+	command, stdin, err := execRequest(in, func() (string, error) { return guest, nil })
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
@@ -494,10 +499,24 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	}
 
 	var out sshx.OutputBuffer
-	code, err := sshx.ExecScript(ctx, timeout, port, user, password, key, command, stdin, &out, &out)
+	code, err := e.Exec(ctx, core.ExecRequest{
+		Env:        in.Name,
+		Command:    command,
+		Stdin:      stdin,
+		GuestShell: guest,
+		Timeout:    timeout,
+		// Always, unlike the CLI's opt-in flag: an agent cannot go and look at
+		// the guest, so a process left running where nobody can see it is
+		// worse than one killed.
+		KillOnTimeout: true,
+		Desktop:       in.Desktop,
+		Stdout:        &out,
+		Stderr:        &out,
+	})
 	if err != nil {
+		var killed *core.KilledError
 		var timedOut *sshx.TimeoutError
-		if errors.As(err, &timedOut) {
+		if errors.As(err, &killed) || errors.As(err, &timedOut) {
 			// Whatever it managed to print is the only clue about where it
 			// got stuck, so it goes in the error.
 			return nil, envExecOutput{}, fmt.Errorf("%w; output so far:\n%s", err, tail(out.String()))
@@ -533,7 +552,13 @@ func execRequest(in envExecInput, guestShell func() (string, error)) (string, io
 		if in.Script != "" {
 			return "", nil, fmt.Errorf("shell cmd cannot run a script: use powershell, or a plain command")
 		}
-		return "cmd /c " + in.Command, nil, nil
+		// That first shell has to be quoted against: on a PowerShell guest an
+		// unquoted cmd line has its $, $() and ; read by PowerShell instead.
+		have, err := guestShell()
+		if err != nil {
+			return "", nil, err
+		}
+		return core.LaunchCmd(have, in.Command), nil, nil
 	}
 	shell, err := requestedShell(in.Shell, guestShell)
 	if err != nil {

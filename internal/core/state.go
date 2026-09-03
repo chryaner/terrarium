@@ -21,6 +21,12 @@ type Golden struct {
 	// Empty on records written before it existed, and on adopted Windows VMs
 	// that have not been reached yet: those are probed on first exec.
 	Shell string `json:"shell,omitempty"`
+	// Transport is how terrarium reaches this golden's guests: empty or "ssh"
+	// for SSH, "guestcontrol" for VirtualBox Guest Additions. Guest Additions
+	// are for a guest that cannot run an SSH server at all - a Windows that
+	// predates OpenSSH - and they need SSHUser and SSHPassword, which is the
+	// only authentication they have.
+	Transport string `json:"transport,omitempty"`
 	// Owned marks a VM terrarium built itself, so it is ours to delete.
 	// Adopted VMs belong to the user and are left alone.
 	Owned bool `json:"owned,omitempty"`
