@@ -146,10 +146,11 @@ func TestToolSchemas(t *testing.T) {
 		{"env_create", []string{"name", "iso_path", "ostype"}, []string{"disk_gb", "cpus", "memory_mb"}},
 		{"env_push", []string{"name", "local_path", "guest_path"}, []string{"recursive"}},
 		{"env_pull", []string{"name", "guest_path", "local_path"}, []string{"recursive"}},
-		{"golden_import", []string{"ova_path", "name"}, []string{"user", "password", "key"}},
+		// image, not name: name is an environment everywhere in this surface.
+		{"golden_import", []string{"ova_path", "image"}, []string{"user", "password", "key"}},
 		// Only the VM is required: adopting without credentials is the first
 		// half of working out an unknown login, not a mistake.
-		{"golden_adopt", []string{"vm"}, []string{"name", "snapshot", "user", "password", "key", "take_snapshot"}},
+		{"golden_adopt", []string{"vm"}, []string{"image", "snapshot", "user", "password", "key", "take_snapshot"}},
 		{"env_fork", []string{"golden", "name"}, []string{"cpus", "memory_mb", "share_host_path", "ttl_seconds"}},
 		{"env_start", []string{"name"}, nil},
 		// command is optional because script is the alternative to it;

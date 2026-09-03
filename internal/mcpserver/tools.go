@@ -209,9 +209,11 @@ func goldenGet(ctx context.Context, _ *mcp.CallToolRequest, in goldenGetInput) (
 
 // --- golden_import ---
 
+// image, not name, throughout the golden_ tools: every tool here uses name for
+// an environment and image for a golden, and one word has to mean one thing.
 type goldenImportInput struct {
 	OVAPath  string `json:"ova_path" jsonschema:"path to the .ova or .ovf appliance file on this machine"`
-	Name     string `json:"name" jsonschema:"name for the new golden image: letters, digits, dots, dashes"`
+	Image    string `json:"image" jsonschema:"name for the new golden image: letters, digits, dots, dashes"`
 	User     string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
 	Password string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
 	Key      string `json:"key,omitempty" jsonschema:"path to an SSH private key for the guest, if there is one"`
@@ -225,18 +227,18 @@ func goldenImport(ctx context.Context, _ *mcp.CallToolRequest, in goldenImportIn
 	var log []string
 	// Hardware is left as the appliance shipped it: nothing here knows what
 	// the machine inside needs, and a vendor image is usually sized already.
-	g, err := e.ImportOVA(in.OVAPath, in.Name, in.User, in.Password, in.Key, 0, 0, progressTo(&log))
+	g, err := e.ImportOVA(in.OVAPath, in.Image, in.User, in.Password, in.Key, 0, 0, progressTo(&log))
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	return nil, goldenGetOutput{Golden: describeGolden(in.Name, g), Log: log}, nil
+	return nil, goldenGetOutput{Golden: describeGolden(in.Image, g), Log: log}, nil
 }
 
 // --- golden_adopt ---
 
 type goldenAdoptInput struct {
 	VM           string `json:"vm" jsonschema:"name of the existing VirtualBox VM, as shown by env_list or terrarium ls"`
-	Name         string `json:"name,omitempty" jsonschema:"golden name to record it under (default: the VM name)"`
+	Image        string `json:"image,omitempty" jsonschema:"golden image name to record it under (default: the VM name)"`
 	Snapshot     string `json:"snapshot,omitempty" jsonschema:"snapshot to fork from (default terrarium-base)"`
 	User         string `json:"user,omitempty" jsonschema:"SSH user inside the guest, if it is known"`
 	Password     string `json:"password,omitempty" jsonschema:"SSH password inside the guest, if it is known"`
@@ -252,7 +254,7 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 		return nil, goldenGetOutput{}, err
 	}
 	g, err := e.Adopt(in.VM, core.AdoptOpts{
-		Image:        in.Name,
+		Image:        in.Image,
 		Snapshot:     in.Snapshot,
 		User:         in.User,
 		Password:     in.Password,
@@ -264,7 +266,7 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	image := in.Name
+	image := in.Image
 	if image == "" {
 		image = in.VM
 	}
