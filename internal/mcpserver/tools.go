@@ -488,7 +488,13 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
-	command, stdin, err := execRequest(in, func() (string, error) { return guest, nil })
+	var command string
+	var stdin io.Reader
+	if in.Desktop {
+		command, err = desktopCommand(in)
+	} else {
+		command, stdin, err = execRequest(in, func() (string, error) { return guest, nil })
+	}
 	if err != nil {
 		return nil, envExecOutput{}, err
 	}
@@ -524,6 +530,32 @@ func envExec(ctx context.Context, _ *mcp.CallToolRequest, in envExecInput) (*mcp
 		return nil, envExecOutput{}, err
 	}
 	return nil, envExecOutput{ExitCode: code, Output: tail(out.String())}, nil
+}
+
+// desktopCommand is the command line a desktop run carries. It takes none of
+// the stdin routes execRequest prefers: a scheduled task action is a command
+// line with no stdin behind it, and cmd.exe is what runs it whatever the
+// guest's own session shell happens to be. Quoting for the guest's shell here
+// would be quoting for a shell that never sees the command.
+func desktopCommand(in envExecInput) (string, error) {
+	if in.Script != "" {
+		return "", fmt.Errorf("desktop runs a command line, not a script: a scheduled task has no stdin to read one from")
+	}
+	if in.Command == "" {
+		return "", fmt.Errorf("pass exactly one of command or script")
+	}
+	switch in.Shell {
+	case "", core.ShellCmd:
+		// The task action wraps this in cmd /c already.
+		return in.Command, nil
+	case core.ShellPowerShell:
+		// Base64: the task action is a cmd command line, and cmd splits on &
+		// and | inside every quoting it has.
+		return core.LaunchPowerShell(core.ShellCmd, in.Command), nil
+	case "sh", core.ShellPOSIX:
+		return "", fmt.Errorf("desktop is for Windows guests, which have no sh")
+	}
+	return "", fmt.Errorf("unknown shell %q: with desktop, one of powershell or cmd", in.Shell)
 }
 
 // execRequest turns the tool's input into the command an SSH session carries
