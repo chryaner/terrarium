@@ -45,10 +45,7 @@ record what works with adopt.`,
 		}
 		fmt.Printf("golden %s ready in %.0fs: `terrarium fork %s <name>`\n",
 			importName, time.Since(start).Seconds(), importName)
-		if g.SSHUser == "" {
-			fmt.Println("note: no SSH user set; drive forks with screenshot/type/keys, and record what works with `" +
-				core.AdoptHint(g.VMName, importName) + "`")
-		}
+		noteIfCredless(g, importName)
 		return nil
 	},
 }

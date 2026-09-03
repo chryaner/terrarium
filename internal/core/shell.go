@@ -25,6 +25,24 @@ func ValidShell(s string) bool {
 	return s == ShellPOSIX || s == ShellCmd || s == ShellPowerShell
 }
 
+// ParseShell maps what a caller asking to run under a particular shell may
+// write to what a golden records, for the CLI's --shell and the MCP server's
+// shell parameter alike. sh is the name people reach for on a Linux guest and
+// posix is the state file's, so both are taken rather than one being a trap.
+// Empty means "whatever the guest already runs" and comes back empty.
+func ParseShell(s string) (string, error) {
+	switch s {
+	case "":
+		return "", nil
+	case "sh":
+		return ShellPOSIX, nil
+	}
+	if !ValidShell(s) {
+		return "", fmt.Errorf("unknown shell %q: one of powershell, cmd, sh", s)
+	}
+	return s, nil
+}
+
 // ScriptCommand is the shell reading a whole script from its own stdin.
 // Neither line has a metacharacter in it, which is the point: whatever shell
 // sshd hands it to passes it on unchanged, and the script itself is parsed

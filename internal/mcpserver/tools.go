@@ -604,19 +604,13 @@ func execRequest(in envExecInput, guestShell func() (string, error)) (string, io
 }
 
 // requestedShell resolves the shell parameter, asking the guest only when it
-// was left out. sh is what the parameter is documented as; posix is what a
-// golden records.
+// was left out.
 func requestedShell(want string, guestShell func() (string, error)) (string, error) {
-	switch want {
-	case "":
-		return guestShell()
-	case "sh":
-		return core.ShellPOSIX, nil
+	shell, err := core.ParseShell(want)
+	if err != nil || shell != "" {
+		return shell, err
 	}
-	if !core.ValidShell(want) {
-		return "", fmt.Errorf("unknown shell %q: one of powershell, cmd, sh", want)
-	}
-	return want, nil
+	return guestShell()
 }
 
 // tail keeps the end of the output: that is where the error is.

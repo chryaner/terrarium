@@ -68,17 +68,17 @@ none.`,
 			if len(args) != 1 || cmd.ArgsLenAtDash() != -1 {
 				return fmt.Errorf("usage: terrarium exec <env> --stdin < script")
 			}
-			// A script reaches its shell on stdin, and cmd.exe has no way to
-			// read one there. Saying so beats quietly running it elsewhere.
-			if execShell == "cmd" {
-				return fmt.Errorf("--stdin cannot use cmd: it has no script mode, use --shell powershell")
-			}
 		} else if cmd.ArgsLenAtDash() != 1 || len(args) < 2 {
 			return fmt.Errorf("usage: terrarium exec <env> -- <command...>")
 		}
-		want, err := shellFlag(execShell)
+		want, err := core.ParseShell(execShell)
 		if err != nil {
 			return err
+		}
+		// A script reaches its shell on stdin, and cmd.exe has no way to read
+		// one there. Saying so beats quietly running it elsewhere.
+		if execScript && want == core.ShellCmd {
+			return fmt.Errorf("--stdin cannot use cmd: it has no script mode, use --shell powershell")
 		}
 		e, err := core.NewEngine()
 		if err != nil {
@@ -132,22 +132,6 @@ none.`,
 		}
 		return nil
 	},
-}
-
-// shellFlag maps what --shell accepts to what a golden records. sh is the
-// name of the thing being asked for on a Linux guest; posix is what the state
-// file calls it, and both are accepted rather than one being a trap.
-func shellFlag(v string) (string, error) {
-	switch v {
-	case "":
-		return "", nil
-	case "sh":
-		return core.ShellPOSIX, nil
-	}
-	if !core.ValidShell(v) {
-		return "", fmt.Errorf("unknown --shell %q: one of powershell, cmd, sh", v)
-	}
-	return v, nil
 }
 
 // execCommand builds the one command string an SSH session carries. want is

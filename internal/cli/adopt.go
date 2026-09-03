@@ -60,12 +60,20 @@ so it is worth using only where SSH is not an option.`,
 			image = args[0]
 		}
 		fmt.Printf("adopted %s as %s (snapshot %q)\n", g.VMName, image, g.Snapshot)
-		if g.SSHUser == "" {
-			fmt.Println("note: no SSH user set; drive forks with screenshot/type/keys, and record what works with `" +
-				core.AdoptHint(g.VMName, image) + "`")
-		}
+		noteIfCredless(g, image)
 		return nil
 	},
+}
+
+// noteIfCredless says how to record credentials on a golden that has none. A
+// credentialless record is a normal halfway state - the login is worked out
+// through the console first - so it is a note rather than a warning.
+func noteIfCredless(g *core.Golden, image string) {
+	if g.SSHUser != "" {
+		return
+	}
+	fmt.Println("note: no SSH user set; drive forks with screenshot/type/keys, and record what works with `" +
+		core.AdoptHint(g.VMName, image) + "`")
 }
 
 func init() {
