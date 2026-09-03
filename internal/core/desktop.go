@@ -122,16 +122,16 @@ func desktopTaskAction(command, outFile, id string) string {
 	return "cmd /c " + MarkCommand(ShellCmd, "( "+command+" ) > "+outFile+" 2>&1", id)
 }
 
-// desktopCreateScript registers the task and starts it. /IT puts it in the
-// interactive session, /RL HIGHEST keeps the elevation an SSH session already
-// had, and /SC ONCE with a start time in the past never fires by itself -
-// schtasks /Run is what starts it.
 // exitWithLastCode is what makes a schtasks failure visible. PowerShell exits
 // 0 after running a script whatever the native commands in it did, so without
 // this a refused /Create looks like a task that was registered and the caller
 // waits out the whole timeout for a command that never ran.
 const exitWithLastCode = "exit $LASTEXITCODE\n"
 
+// desktopCreateScript registers the task and starts it. /IT puts it in the
+// interactive session, /RL HIGHEST keeps the elevation an SSH session already
+// had, and /SC ONCE with a start time in the past never fires by itself -
+// schtasks /Run is what starts it.
 func desktopCreateScript(task, action string) string {
 	return "schtasks /Create /TN " + psQuote(task) + " /TR " + psQuote(action) +
 		" /SC ONCE /ST 00:00 /IT /RL HIGHEST /F\n" +
@@ -156,13 +156,13 @@ func desktopCleanupScript(task, outFile string) string {
 		"Remove-Item " + psQuote(outFile) + " -Force -ErrorAction SilentlyContinue\n"
 }
 
-// noConsoleSessionErr says what to do rather than only what is wrong: the
-// machines this happens on are goldens built before the post-install set up
-// automatic logon, and logging in by hand is a three-command fix.
+// noConsoleSessionErr says what to do rather than only what is wrong: this
+// happens on goldens whose post-install did not set up automatic logon, and
+// logging in by hand is a three-command fix.
 func noConsoleSessionErr(env string) error {
 	return fmt.Errorf("no user is logged on at the console of %q, so --desktop has no session to run in.\n"+
 		"log one in first: `terrarium screenshot %s` to see the logon screen, `terrarium type %s <password>`, `terrarium keys %s enter`.\n"+
-		"goldens built from now on log on by themselves; one built before that has to be logged in once per boot",
+		"a golden built with automatic logon logs itself on; one without has to be logged in once per boot",
 		env, env, env, env)
 }
 
@@ -217,9 +217,10 @@ func (e *Engine) execDesktop(ctx context.Context, r ExecRequest) (int, error) {
 		return -1, fmt.Errorf("schtasks exited %d registering the desktop task, so the command never ran:\n%s",
 			code, strings.TrimSpace(out))
 	}
-	// The task exists from here, so it goes whatever happens next - including
-	// the paths that return an error, which is where it used to be left behind
-	// with its output file.
+	// The task exists from here, so it goes whatever happens next, the paths
+	// that return an error included. Best effort: a cleanup that fails leaves
+	// a dead task and a scratch file, which is not worth losing the command's
+	// own result over.
 	defer e.runScript(context.Background(), r.Env, ShellPowerShell, desktopCleanupScript(task, outFile))
 
 	code, err = e.waitDesktopTask(ctx, r, task)
@@ -273,20 +274,17 @@ func (e *Engine) waitDesktopTask(ctx context.Context, r ExecRequest, task string
 // which is sometimes exactly what the caller wants to look at.
 func (e *Engine) desktopTimeout(r ExecRequest, task string) error {
 	if !r.KillOnTimeout {
-		// The task registration goes with the caller's return - the process it
-		// started does not, and it is still on the screen, which is often what
-		// the caller wanted to see.
 		return fmt.Errorf("command did not finish within %s and is still running on the guest's desktop: %s\n"+
 			"look at it with `terrarium screenshot %s`; --kill-on-timeout would have killed it and its children",
 			r.Timeout, r.Command, r.Env)
 	}
-	ctx := context.Background()
 	// The marker kill comes first, and it is the one that matters: /End stops
 	// the task's own process and leaves whatever that process started running,
 	// which is exactly the window the caller was waiting on. Killing the
-	// marked tree takes both; /End afterwards clears the task's running state.
+	// marked tree takes both; /End afterwards only clears the task's running
+	// state, so its failure has nothing to add to the kill's own result.
 	id := strings.TrimPrefix(task, "trr-")
 	err := e.killMarked(r.Env, ShellCmd, id, r.Timeout, r.Command)
-	e.runScript(ctx, r.Env, ShellPowerShell, desktopEndScript(task))
+	e.runScript(context.Background(), r.Env, ShellPowerShell, desktopEndScript(task))
 	return err
 }

@@ -2,8 +2,8 @@ package core
 
 import "testing"
 
-// The bug this exists for: a recipe pinned to Windows10 installed a 32-bit
-// guest from an x64 ISO, and nothing in the tool said so until setup failed.
+// The suffix on the guest type id is the only place the architecture shows,
+// and everything that reports or compares it reads it from here.
 func TestArchOf(t *testing.T) {
 	cases := map[string]string{
 		"Windows10":          "x86",

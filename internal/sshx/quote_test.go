@@ -57,9 +57,9 @@ func TestQuotePOSIXQuotesBackslashes(t *testing.T) {
 	}
 }
 
-// The other half of the field report: PowerShell one-liners needed three
-// layers of escaping because everything was joined for cmd.exe. What the
-// guest's PowerShell must see for it to rebuild the argv the user typed.
+// What a guest's PowerShell must see for it to rebuild the argv the user
+// typed. Joining the words instead costs three layers of escaping, because
+// cmd.exe is then the parser everything has to survive.
 func TestQuotePowerShell(t *testing.T) {
 	cases := []struct {
 		name string

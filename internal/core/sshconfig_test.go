@@ -212,8 +212,8 @@ func TestUpdateSSHConfigUsesProfile(t *testing.T) {
 	}
 }
 
-// The field report: a Windows env's block looked like every other one, so
-// `scp yad2:` popped Git's askpass dialog with nothing to say where it came
+// A password-only env's block otherwise looks like every other one, so `scp
+// <env>:` pops an askpass dialog with nothing in it to say where it came
 // from. The block has to admit what it is.
 func TestRenderSSHConfigMarksPasswordAuth(t *testing.T) {
 	out := RenderSSHConfig(testState())

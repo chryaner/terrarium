@@ -118,11 +118,11 @@ func isWindowsGuest(ostype string) bool {
 }
 
 // resolveISOOSType decides which guest type an ISO build creates its VM with.
-// The recipe is a guess written once; the ISO in front of us is the fact, and
-// the field report that prompted this was a recipe pinned to a 32-bit Windows
-// silently used for an x64 disc. So the detected type wins any disagreement
-// about architecture, and the recipe still wins where they agree - it may name
-// a more specific edition than detection can.
+// The recipe is a guess written once; the ISO in front of us is the fact, and a
+// recipe pinned to a 32-bit Windows under an x64 disc fails deep inside setup
+// with nothing to say why. So the detected type wins any disagreement about
+// architecture, and the recipe still wins where they agree - it may name a more
+// specific edition than detection can.
 func resolveISOOSType(image, fromRecipe, detected string, progress func(string)) (string, error) {
 	switch {
 	case fromRecipe == "" && detected == "":

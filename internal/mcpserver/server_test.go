@@ -79,9 +79,9 @@ func TestServerInstructions(t *testing.T) {
 	}
 }
 
-// The reported misuse: an agent believed adopt needed working credentials up
-// front, so a machine whose login nobody knew looked impossible to take on.
-// The instructions are the only place it reads before choosing a first call.
+// An agent that reads adopt as needing working credentials up front will not
+// take on a machine whose login nobody knows. The instructions are the only
+// place it reads before choosing a first call.
 func TestInstructionsCoverUnknownCredentials(t *testing.T) {
 	got := connect(t).InitializeResult().Instructions
 	for _, want := range []string{"golden_import", "golden_adopt", "env_screenshot", "env_type"} {

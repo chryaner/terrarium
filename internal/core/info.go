@@ -76,7 +76,7 @@ func (e *Engine) Info(name string) (Info, error) {
 		state = "unknown (VM not in VirtualBox)"
 	}
 	in.State = state
-	if ostype, err := e.OSTypeOf(name); err == nil {
+	if ostype, err := e.osTypeOf(name); err == nil {
 		in.OSType = ostype
 	}
 	in.Arch = ArchOf(in.OSType)

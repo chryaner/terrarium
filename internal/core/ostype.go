@@ -75,10 +75,10 @@ func (e *Engine) FillOSTypes() error {
 	return e.St.Save()
 }
 
-// OSTypeOf resolves the guest type of a golden or an env by name, filling the
-// record if it was blank. Goldens win a name collision, the way `info` reads
-// them.
-func (e *Engine) OSTypeOf(name string) (string, error) {
+// osTypeOf resolves the guest type of a golden or an env by name, filling the
+// record if it was blank. Envs win a name collision, the way every other
+// lookup resolves one.
+func (e *Engine) osTypeOf(name string) (string, error) {
 	if env := e.St.Envs[name]; env != nil {
 		return e.osType(env.VMName, &env.OSType)
 	}

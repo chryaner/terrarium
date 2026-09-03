@@ -14,8 +14,8 @@ func TestResolveISOOSType(t *testing.T) {
 		wantSaid   string
 	}{
 		{
-			// The reported bug: a recipe pinned to 32-bit, an x64 disc, and
-			// nothing said so until Windows setup failed.
+			// A recipe pinned to 32-bit under an x64 disc: nothing says so
+			// until Windows setup fails, forty minutes in.
 			name:       "detection overrides a wrong arch",
 			fromRecipe: "Windows10", detected: "Windows10_64",
 			want:     "Windows10_64",

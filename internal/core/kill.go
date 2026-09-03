@@ -135,14 +135,14 @@ func (e *KilledError) Error() string {
 		e.Timeout, e.Command, e.Killed)
 }
 
-// command is what the caller asked to run, not the marked line it was sent
-// as: the marker is bookkeeping, and showing it only makes the reader wonder
-// what they typed wrong.
-//
 // killMarked opens a second session and kills whatever the marker still names.
 // A failed kill keeps the timeout as the reported cause: the command not
 // finishing is the thing the caller asked about, and the cleanup failing is
 // detail on top of it.
+//
+// command is what the caller asked to run, not the marked line it was sent as:
+// the marker is bookkeeping, and showing it only makes the reader wonder what
+// they typed wrong.
 func (e *Engine) killMarked(envName, shell, id string, timeout time.Duration, command string) error {
 	script, scriptShell := KillScript(shell, id)
 	var out sshx.OutputBuffer
