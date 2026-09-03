@@ -97,8 +97,14 @@ func psQuote(s string) string {
 //
 // The marker goes inside the cmd /c argument, not around it: a task action is
 // a program plus arguments, and `set` is not a program.
+//
+// The command is parenthesised because a redirect binds to one command:
+// `a & b > f` sends only b's output to the file, and `a | b > f` only b's, so
+// anything compound would lose most of what it printed - and the file is all
+// the caller gets back. A block redirects as a whole, and still exits with
+// what its last command exited with.
 func desktopTaskAction(command, outFile, id string) string {
-	return "cmd /c " + MarkCommand(ShellCmd, command+" > "+outFile+" 2>&1", id)
+	return "cmd /c " + MarkCommand(ShellCmd, "( "+command+" ) > "+outFile+" 2>&1", id)
 }
 
 // desktopCreateScript registers the task and starts it. /IT puts it in the

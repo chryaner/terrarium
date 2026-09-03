@@ -66,14 +66,21 @@ func TestParseTaskQuery(t *testing.T) {
 // the marker that makes a timeout killable.
 func TestDesktopTaskAction(t *testing.T) {
 	got := desktopTaskAction("notepad", `C:\Windows\Temp\trr-1.out`, "abc123")
-	want := `cmd /c set TRR_MARK=trr:abc123 & notepad > C:\Windows\Temp\trr-1.out 2>&1`
+	want := `cmd /c set TRR_MARK=trr:abc123 & ( notepad ) > C:\Windows\Temp\trr-1.out 2>&1`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
+	// A redirect binds to one command, so a compound command has to be
+	// wrapped: `a & b > f` sends only b's output to the file, and the file is
+	// all the caller gets back.
+	compound := desktopTaskAction("echo a & dir /b x", "out", "abc123")
+	if !strings.Contains(compound, "( echo a & dir /b x ) > out") {
+		t.Errorf("a compound command is not parenthesised: %s", compound)
+	}
 	// cmd /c reports what its last command exited with, so nothing of ours
 	// may run after the caller's.
-	if !strings.HasSuffix(got, "2>&1") {
-		t.Errorf("something runs after the command, so its exit code is lost: %s", got)
+	if !strings.HasSuffix(compound, "2>&1") {
+		t.Errorf("something runs after the command, so its exit code is lost: %s", compound)
 	}
 }
 
