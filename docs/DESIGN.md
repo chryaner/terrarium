@@ -88,7 +88,7 @@ are obvious and all of them cost time to rediscover:
    finishes. terrarium ejects them itself before snapshotting - a golden that
    boots the installer again on every fork is not a golden.
 
-The post-install does three more things with that one command line, and they
+The post-install does four more things with that one command line, and they
 are what makes a Windows golden behave like a Linux one. It writes the
 generated ed25519 public key into
 `%ProgramData%\ssh\administrators_authorized_keys` - the only
@@ -96,9 +96,13 @@ generated ed25519 public key into
 administrators group - and resets that file's ACL to Administrators and SYSTEM,
 without which sshd ignores it and says nothing. It points
 `HKLM\SOFTWARE\OpenSSH\DefaultShell` at `powershell.exe`, so a command sent
-over SSH is parsed once by PowerShell instead of three times by cmd.exe. The
-golden keeps the password as well as the key, because RDP and the console
-still authenticate with it.
+over SSH is parsed once by PowerShell instead of three times by cmd.exe. And it
+sets Winlogon to log the account in by itself, so every fork has an interactive
+session for `screenshot` and `exec --desktop` to work in; that means the
+password goes into `HKLM\...\Winlogon` in clear, which is what `AutoAdminLogon`
+is, and it is the same throwaway password the recipe already keeps in plain
+text. The golden keeps that password as well as the key, because RDP and the
+console still authenticate with it.
 
 That is also why goldens carry a `shell` field. Quoting an argv is
 shell-specific and there is no spelling that works for more than one of them,
