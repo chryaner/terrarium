@@ -51,7 +51,16 @@ so it is worth using only where SSH is not an option.`,
 		if err != nil {
 			return err
 		}
-		g, err := e.Adopt(args[0], adoptName, adoptSnapshot, adoptUser, adoptPassword, adoptKey, adoptShell, adoptTransport, adoptTake)
+		g, err := e.Adopt(args[0], core.AdoptOpts{
+			Image:        adoptName,
+			Snapshot:     adoptSnapshot,
+			User:         adoptUser,
+			Password:     adoptPassword,
+			Key:          adoptKey,
+			Shell:        adoptShell,
+			Transport:    adoptTransport,
+			TakeSnapshot: adoptTake,
+		})
 		if err != nil {
 			return err
 		}

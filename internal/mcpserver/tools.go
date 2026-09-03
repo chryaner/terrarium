@@ -251,7 +251,16 @@ func goldenAdopt(ctx context.Context, _ *mcp.CallToolRequest, in goldenAdoptInpu
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}
-	g, err := e.Adopt(in.VM, in.Name, in.Snapshot, in.User, in.Password, in.Key, in.Shell, in.Transport, in.TakeSnapshot)
+	g, err := e.Adopt(in.VM, core.AdoptOpts{
+		Image:        in.Name,
+		Snapshot:     in.Snapshot,
+		User:         in.User,
+		Password:     in.Password,
+		Key:          in.Key,
+		Shell:        in.Shell,
+		Transport:    in.Transport,
+		TakeSnapshot: in.TakeSnapshot,
+	})
 	if err != nil {
 		return nil, goldenGetOutput{}, err
 	}

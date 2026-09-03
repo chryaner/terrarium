@@ -68,42 +68,72 @@ func (e *Engine) findVM(name string) (*vbox.VM, error) {
 	return nil, fmt.Errorf("no VirtualBox VM named %q", name)
 }
 
-// Adopt records an existing VM+snapshot as a golden image. Re-running updates
-// the record, which is how credentials are set later: adopt credless, work out
-// the login through the console, adopt again with what worked. image names the
-// golden; empty means the VM's own name.
-func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell, transport string, takeSnapshot bool) (*Golden, error) {
-	if !validSSHUser(user) {
-		return nil, fmt.Errorf("ssh user contains an illegal character")
+// AdoptOpts is everything adopt records about a VM besides the VM itself.
+// All of it is optional: a machine whose login nobody knows is adopted with
+// none of it, and a later adopt fills in what the console turned up.
+type AdoptOpts struct {
+	// Image is the golden name to record under. Empty means the name the VM is
+	// already recorded under, or the VM's own name.
+	Image    string
+	Snapshot string
+	User     string
+	Password string
+	Key      string
+	// Shell is what an SSH session lands in; see Golden.Shell.
+	Shell string
+	// Transport is how terrarium reaches the guest; see Golden.Transport.
+	Transport string
+	// TakeSnapshot creates Snapshot when the VM does not have it. It is the
+	// only thing adopt changes about the user's VM.
+	TakeSnapshot bool
+}
+
+// adoptChecks validates an adopt and resolves the golden name it records
+// under, without touching VirtualBox, so the rules are testable without one.
+func adoptChecks(st *State, vmName string, o AdoptOpts) (string, error) {
+	if !validSSHUser(o.User) {
+		return "", fmt.Errorf("ssh user contains an illegal character")
 	}
-	if shell != "" && !ValidShell(shell) {
-		return nil, fmt.Errorf("unknown shell %q: one of %s", shell, strings.Join(Shells, ", "))
+	if o.Shell != "" && !ValidShell(o.Shell) {
+		return "", fmt.Errorf("unknown shell %q: one of %s", o.Shell, strings.Join(Shells, ", "))
 	}
-	if transport != "" && !validTransport(transport) {
-		return nil, fmt.Errorf("unknown transport %q: one of %s", transport, strings.Join(Transports, ", "))
+	if o.Transport != "" && !validTransport(o.Transport) {
+		return "", fmt.Errorf("unknown transport %q: one of %s", o.Transport, strings.Join(Transports, ", "))
 	}
 	// Guest Additions have no key auth and no way to ask for one, so a record
 	// that cannot log in is worth refusing here rather than at the first exec.
-	if transport == TransportGuestControl && user != "" && password == "" {
-		return nil, fmt.Errorf("the guestcontrol transport authenticates with a password: pass --password as well as --user")
+	if o.Transport == TransportGuestControl && o.User != "" && o.Password == "" {
+		return "", fmt.Errorf("the guestcontrol transport authenticates with a password: pass --password as well as --user")
 	}
-	if image == "" {
-		// A VM already recorded under a golden name is that golden: a second
-		// record for the same VM would let rm --golden on one take the other.
-		image = vmName
-		for name, g := range e.St.Goldens {
-			if g.VMName == vmName {
-				image = name
-				break
-			}
+	if o.Image != "" {
+		if !goldenNameRe.MatchString(o.Image) {
+			return "", fmt.Errorf("invalid golden name %q (letters, digits, dots, dashes)", o.Image)
 		}
-	} else if !goldenNameRe.MatchString(image) {
-		return nil, fmt.Errorf("invalid golden name %q (letters, digits, dots, dashes)", image)
+		return o.Image, nil
+	}
+	// A VM already recorded under a golden name is that golden: a second
+	// record for the same VM would let rm --golden on one take the other.
+	for name, g := range st.Goldens {
+		if g.VMName == vmName {
+			return name, nil
+		}
+	}
+	return vmName, nil
+}
+
+// Adopt records an existing VM+snapshot as a golden image. Re-running updates
+// the record, which is how credentials are set later: adopt credless, work out
+// the login through the console, adopt again with what worked.
+func (e *Engine) Adopt(vmName string, o AdoptOpts) (*Golden, error) {
+	image, err := adoptChecks(e.St, vmName, o)
+	if err != nil {
+		return nil, err
 	}
 	vm, err := e.findVM(vmName)
 	if err != nil {
 		return nil, err
 	}
+	snapshot := o.Snapshot
 	if snapshot == "" {
 		snapshot = DefaultSnapshot
 	}
@@ -112,7 +142,7 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell, tran
 		return nil, err
 	}
 	if !has {
-		if !takeSnapshot {
+		if !o.TakeSnapshot {
 			return nil, fmt.Errorf("%s has no snapshot %q: pass --take-snapshot to create it, or --snapshot to use an existing one", vmName, snapshot)
 		}
 		if err := e.VB.TakeSnapshot(vmName, snapshot); err != nil {
@@ -133,28 +163,28 @@ func (e *Engine) Adopt(vmName, image, snapshot, user, password, key, shell, tran
 	if ostype, err := e.VB.OSTypeID(vmName); err == nil {
 		g.OSType = ostype
 	}
-	if user != "" {
-		g.SSHUser = user
+	// Only what was passed, so an adopt that names one field leaves the rest
+	// of an existing record alone.
+	if o.User != "" {
+		g.SSHUser = o.User
 	}
-	if password != "" {
-		g.SSHPassword = password
+	if o.Password != "" {
+		g.SSHPassword = o.Password
 	}
-	if key != "" {
-		g.SSHKey = key
+	if o.Key != "" {
+		g.SSHKey = o.Key
 	}
-	if transport != "" {
-		g.Transport = transport
+	if o.Transport != "" {
+		g.Transport = o.Transport
 	}
 	switch {
-	case shell != "":
-		g.Shell = shell
-	case g.Shell == "" && g.hasCreds():
+	case o.Shell != "":
+		g.Shell = o.Shell
+	case g.Shell == "" && g.hasCreds() && g.OSType != "":
 		// The golden VM is not running and carries no port forward, so a
 		// Windows guest cannot be asked here: probeShell answers "" for it and
 		// the first exec against a fork settles it. --shell skips that.
-		if g.OSType != "" {
-			g.Shell = probeShell(g.OSType, nil)
-		}
+		g.Shell = probeShell(g.OSType, nil)
 	}
 	return g, e.St.Save()
 }
