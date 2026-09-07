@@ -1,0 +1,7 @@
+.git
+dist
+npm/dist
+npm/node_modules
+docs/demo
+*.gif
+*.md
