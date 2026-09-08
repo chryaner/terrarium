@@ -18,4 +18,6 @@ COPY --from=build /out/terrarium /usr/local/bin/terrarium
 # terrarium keeps its state under LOCALAPPDATA on Windows; give it a home here.
 ENV LOCALAPPDATA=/data
 RUN mkdir -p /data
-ENTRYPOINT ["/usr/local/bin/terrarium", "mcp"]
+# CMD rather than ENTRYPOINT: directories that run the image pass the whole
+# start command themselves, and a fixed entrypoint would prefix it.
+CMD ["terrarium", "mcp"]
