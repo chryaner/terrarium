@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,15 +62,24 @@ func Locate() (string, error) {
 	if p, err := exec.LookPath("VBoxManage"); err == nil {
 		return p, nil
 	}
-	for _, p := range []string{
-		`C:\Program Files\Oracle\VirtualBox\VBoxManage.exe`,
-		`C:\Program Files (x86)\Oracle\VirtualBox\VBoxManage.exe`,
-	} {
+	for _, p := range installPaths(runtime.GOOS) {
 		if _, err := os.Stat(p); err == nil {
 			return p, nil
 		}
 	}
 	return "", fmt.Errorf("VBoxManage not found: is VirtualBox installed?")
+}
+
+// installPaths are where installers put VBoxManage, for when PATH is thin: an
+// MCP client often starts its servers with a minimal environment.
+func installPaths(goos string) []string {
+	if goos == "windows" {
+		return []string{
+			`C:\Program Files\Oracle\VirtualBox\VBoxManage.exe`,
+			`C:\Program Files (x86)\Oracle\VirtualBox\VBoxManage.exe`,
+		}
+	}
+	return []string{"/usr/bin/VBoxManage", "/usr/local/bin/VBoxManage", "/usr/lib/virtualbox/VBoxManage"}
 }
 
 func New() (*Client, error) {
