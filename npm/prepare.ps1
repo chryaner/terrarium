@@ -40,8 +40,9 @@ foreach ($t in $targets) {
 
     $out = Join-Path $tmp ([IO.Path]::GetFileNameWithoutExtension($t.Staged) + '-extract')
     New-Item -ItemType Directory -Force -Path $out | Out-Null
-    # tar.exe ships with Windows 10 and later and reads both formats.
-    tar -xf $archive -C $out
+    # Windows' own tar.exe reads both formats. Named by path: Git's tar is often
+    # first on PATH and takes C: for a remote host.
+    & "$env:SystemRoot\System32\tar.exe" -xf $archive -C $out
     if ($LASTEXITCODE -ne 0) { throw "extracting $($t.Archive) failed" }
     Copy-Item -Path (Join-Path $out $t.Binary) -Destination (Join-Path $dist $t.Staged) -Force
 }
