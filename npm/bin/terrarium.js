@@ -43,9 +43,13 @@ function executable(file) {
   } catch (_) {}
   fs.mkdirSync(path.dirname(copy), { recursive: true, mode: 0o700 });
   const tmp = copy + '.' + process.pid;
-  fs.copyFileSync(file, tmp);
-  fs.chmodSync(tmp, 0o755);
-  fs.renameSync(tmp, copy);
+  try {
+    fs.copyFileSync(file, tmp);
+    fs.chmodSync(tmp, 0o755);
+    fs.renameSync(tmp, copy);
+  } finally {
+    fs.rmSync(tmp, { force: true });
+  }
   return copy;
 }
 
@@ -54,9 +58,14 @@ if (!name) {
   fail('no binary for ' + process.platform + '-' + process.arch + '; terrarium runs on x64 Windows and Linux hosts with VirtualBox');
 }
 
+const bundled = path.join(__dirname, '..', 'dist', name);
+if (!fs.existsSync(bundled)) {
+  fail('this package is missing its ' + name + ' binary; reinstall terrarium-mcp');
+}
+
 let exe;
 try {
-  exe = executable(path.join(__dirname, '..', 'dist', name));
+  exe = executable(bundled);
 } catch (err) {
   fail('cannot make the bundled binary executable: ' + err.message);
 }

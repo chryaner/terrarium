@@ -107,7 +107,6 @@ func cloneEnvs(m map[string]*Env) map[string]*Env {
 	return out
 }
 
-// dataDir holds everything terrarium owns on the host.
 func dataDir() (string, error) { return paths.DataDir() }
 
 func statePath() (string, error) {

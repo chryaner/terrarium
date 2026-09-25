@@ -1,5 +1,6 @@
 # Builds the MCP server for directories that run servers in a container to
-# inspect them (Glama and the like). VirtualBox is not in the image, so every
+# inspect them (Glama and the like). Listing only: terrarium cannot manage VMs
+# from inside a container. VirtualBox is not in the image, so every
 # tool answers with doctor's report instead of a machine; tool discovery and
 # the handshake work as on a real host.
 FROM golang:1.25-alpine AS build

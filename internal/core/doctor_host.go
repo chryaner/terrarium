@@ -28,7 +28,7 @@ func linuxKernelChecks(modules string) []Check {
 		drv = Check{
 			Name:   "vboxdrv kernel module",
 			Detail: "not loaded, so no VM can start",
-			Fix:    "run `sudo /sbin/vboxconfig` to build and load it; with Secure Boot on, the module has to be signed first or the kernel refuses it",
+			Fix:    "run `sudo modprobe vboxdrv`; if the module is missing, Oracle's package rebuilds it with `sudo /sbin/vboxconfig` and distro packages with their dkms package. With Secure Boot on, the module has to be signed or the kernel refuses it",
 		}
 	}
 	checks := []Check{drv}
