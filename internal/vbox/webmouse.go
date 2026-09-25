@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,13 +28,30 @@ const (
 
 var webEndpoint = fmt.Sprintf("http://127.0.0.1:%d/", webPort)
 
-// webMouse drives IMouse over SOAP. ensure brings the service up when it
-// cannot be reached; it is called at most once per operation.
+// webMouse drives IMouse over SOAP. Each hook runs at most once per
+// operation:
+//   - ensure brings the service up when nothing answers;
+//   - register writes this password's hash for VBoxAuthSimple, which reads
+//     it at every login, so a service holding an older one heals in place;
+//   - vouch, when set, runs before every logon and refuses a listener this
+//     user does not own, so the password never goes to a port another local
+//     user got to first.
 type webMouse struct {
 	soap     *soapClient
 	user     string
 	password string
 	ensure   func() error
+	register func() error
+	vouch    func() error
+}
+
+func (w *webMouse) logon() (string, error) {
+	if w.vouch != nil {
+		if err := w.vouch(); err != nil {
+			return "", err
+		}
+	}
+	return w.soap.call("IWebsessionManager_logon", arg("username", w.user), arg("password", w.password))
 }
 
 // mouseRef is the managed-object reference of a running VM's IMouse.
@@ -43,18 +61,28 @@ type mouseRef string
 // second GUI would take), and hands fn its IMouse. It always unlocks and logs
 // off, so nothing is left for the service's session timeout to reap.
 func (w *webMouse) with(vm string, fn func(mouseRef) error) error {
-	vbox, err := w.soap.call("IWebsessionManager_logon", arg("username", w.user), arg("password", w.password))
+	vbox, err := w.logon()
 	if isTransport(err) {
 		if serr := w.ensure(); serr != nil {
 			return fmt.Errorf("VirtualBox web service is not running and could not be started: %w", serr)
 		}
-		vbox, err = w.soap.call("IWebsessionManager_logon", arg("username", w.user), arg("password", w.password))
+		vbox, err = w.logon()
 	}
 	if isTransport(err) {
 		return fmt.Errorf("VirtualBox web service at %s: %w", w.soap.endpoint, err)
 	}
+	var foreign *foreignListenerError
+	if errors.As(err, &foreign) {
+		return err
+	}
 	if err != nil {
-		return fmt.Errorf("the VirtualBox web service at %s refused terrarium's login (%w): something else holds that port, or it runs with an older password - stop it with `pkill vboxwebsrv` and try again", w.soap.endpoint, err)
+		if rerr := w.register(); rerr != nil {
+			return fmt.Errorf("the VirtualBox web service refused terrarium's login (%v), and re-registering its password failed: %w", err, rerr)
+		}
+		vbox, err = w.logon()
+	}
+	if err != nil {
+		return fmt.Errorf("the VirtualBox web service at %s refused terrarium's login (%w): another program holds that port, or it was not started by terrarium - stop it with `pkill -f 'vboxwebsrv.*--port %d'` and try again", w.soap.endpoint, err, webPort)
 	}
 	defer w.soap.call("IWebsessionManager_logoff", arg("refIVirtualBox", vbox))
 
@@ -64,7 +92,7 @@ func (w *webMouse) with(vm string, fn func(mouseRef) error) error {
 	}
 	session, err := w.soap.call("IWebsessionManager_getSessionObject", arg("refIVirtualBox", vbox))
 	if err != nil {
-		return err
+		return fmt.Errorf("opening a session for %q: %w", vm, err)
 	}
 	if _, err := w.soap.call("IMachine_lockMachine", arg("_this", machine), arg("session", session), arg("lockType", "Shared")); err != nil {
 		return fmt.Errorf("attaching to %q (is it running?): %w", vm, err)
@@ -73,31 +101,31 @@ func (w *webMouse) with(vm string, fn func(mouseRef) error) error {
 
 	console, err := w.soap.call("ISession_getConsole", arg("_this", session))
 	if err != nil {
-		return err
+		return fmt.Errorf("reaching the console of %q: %w", vm, err)
 	}
 	if console == "" {
 		return fmt.Errorf("VM %q has no console: it is not running", vm)
 	}
 	mouse, err := w.soap.call("IConsole_getMouse", arg("_this", console))
 	if err != nil {
-		return err
+		return fmt.Errorf("reaching the mouse of %q: %w", vm, err)
 	}
 	return fn(mouseRef(mouse))
 }
 
-// putEvents mirrors the COM path in mouse_windows.go: same tablet check, same
-// +1 from screenshot pixels to the API's 1-based coordinates.
+// putEvents mirrors the COM path in mouse_windows.go.
 func (w *webMouse) putEvents(vm string, events []MouseEvent, gap time.Duration) error {
 	return w.with(vm, func(m mouseRef) error {
 		if abs, err := w.soap.call("IMouse_getAbsoluteSupported", arg("_this", string(m))); err == nil && abs == "false" {
-			return fmt.Errorf("VM %q has no absolute pointing device: re-fork the env, or power it off and run: VBoxManage modifyvm %s --mouse usbtablet", vm, vm)
+			return errNoTablet(vm)
 		}
 		for i, ev := range events {
 			if i > 0 && gap > 0 {
 				time.Sleep(gap)
 			}
+			x, y := ev.apiXY()
 			if _, err := w.soap.call("IMouse_putMouseEventAbsolute", arg("_this", string(m)),
-				arg("x", ev.X+1), arg("y", ev.Y+1), arg("dz", 0), arg("dw", 0), arg("buttonState", ev.Buttons)); err != nil {
+				arg("x", x), arg("y", y), arg("dz", 0), arg("dw", 0), arg("buttonState", ev.Buttons)); err != nil {
 				return fmt.Errorf("mouse event %d/%d: %w", i+1, len(events), err)
 			}
 		}
@@ -122,26 +150,91 @@ func authSimpleHash(password string) string {
 }
 
 // loadOrCreateSecret returns the web service password kept in dir, making one
-// on first use. Owner-only, like the SSH keys beside it.
+// on first use. Owner-only, like the SSH keys beside it. The CLI and an MCP
+// server can get here at the same moment, so the file is published with a
+// link that fails if it exists: exactly one secret wins, and the loser reads
+// it instead of registering a hash nobody will send.
 func loadOrCreateSecret(dir string) (string, error) {
 	path := filepath.Join(dir, secretFile)
-	if b, err := os.ReadFile(path); err == nil {
-		if s := strings.TrimSpace(string(b)); s != "" {
-			return s, nil
+	for range 3 {
+		b, err := os.ReadFile(path)
+		switch {
+		case err == nil && strings.TrimSpace(string(b)) != "":
+			return strings.TrimSpace(string(b)), nil
+		case err == nil:
+			// Empty is unusable; replace it.
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return "", err
+			}
+		case !errors.Is(err, os.ErrNotExist):
+			return "", err
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		var raw [16]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return "", err
+		}
+		secret := hex.EncodeToString(raw[:])
+		won, err := publishOnce(dir, path, secret+"\n")
+		if err != nil {
+			return "", err
+		}
+		if won {
+			return secret, nil
+		}
 	}
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		return "", err
-	}
-	secret := hex.EncodeToString(raw[:])
+	return "", fmt.Errorf("could not settle on a password in %s", path)
+}
+
+// publishOnce writes content to path only if path does not exist yet, and
+// never leaves a partly written file there for a reader to see.
+func publishOnce(dir, path, content string) (bool, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", err
+		return false, err
 	}
-	if err := os.WriteFile(path, []byte(secret+"\n"), 0o600); err != nil {
-		return "", err
+	tmp, err := os.CreateTemp(dir, ".secret-*")
+	if err != nil {
+		return false, err
 	}
-	return secret, nil
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		return false, err
+	}
+	if err := tmp.Close(); err != nil {
+		return false, err
+	}
+	switch err := os.Link(tmp.Name(), path); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, os.ErrExist):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// foreignListenerError means the web service port belongs to another user.
+type foreignListenerError struct {
+	port, uid int
+}
+
+func (e *foreignListenerError) Error() string {
+	return fmt.Sprintf("127.0.0.1:%d is held by another user (uid %d), not a vboxwebsrv of yours; terrarium will not send it a password. Find it with `ss -ltnp 'sport = :%d'`", e.port, e.uid, e.port)
+}
+
+// listenerUID finds who owns the IPv4 loopback listener on port in the text
+// of /proc/net/tcp. found is false when nothing listens there.
+func listenerUID(procNetTCP string, port int) (uid int, found bool) {
+	want := fmt.Sprintf("0100007F:%04X", port)
+	for _, line := range strings.Split(procNetTCP, "\n") {
+		f := strings.Fields(line)
+		// sl local rem st tx:rx tr:when retrnsmt uid ...; 0A is LISTEN.
+		if len(f) < 8 || f[1] != want || f[3] != "0A" {
+			continue
+		}
+		if n, err := strconv.Atoi(f[7]); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }

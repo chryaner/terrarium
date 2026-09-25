@@ -592,12 +592,22 @@ const (
 
 // MouseEvent is one absolute mouse state: where the pointer is and which
 // buttons are held while it is there. Coordinates are 0-based screen pixels,
-// exactly what ScreenshotPNG shows. Implemented in mouse_windows.go: mouse
-// injection is the one thing VBoxManage has no verb for, so it is the one
-// call that goes through VirtualBox's COM API instead.
+// exactly what ScreenshotPNG shows. Mouse injection is the one thing
+// VBoxManage has no verb for, so it goes to the Main API instead: COM in
+// mouse_windows.go, SOAP in mouse_unix.go.
 type MouseEvent struct {
 	X, Y    int
 	Buttons int
+}
+
+// apiXY is the event's position as the Main API counts it, from [1,1];
+// screenshots count from [0,0].
+func (ev MouseEvent) apiXY() (int, int) { return ev.X + 1, ev.Y + 1 }
+
+// errNoTablet explains why absolute events would vanish without a trace: envs
+// forked before terrarium set up USB tablets are PS/2-only.
+func errNoTablet(vm string) error {
+	return fmt.Errorf("VM %q has no absolute pointing device: re-fork the env, or power it off and run: VBoxManage modifyvm %s --mouse usbtablet", vm, vm)
 }
 
 // NATForwardRunning adds a port forward to a VM that is already up. modifyvm

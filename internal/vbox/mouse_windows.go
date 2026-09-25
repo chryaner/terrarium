@@ -95,23 +95,21 @@ func withMouse(vm string, fn func(mouse *ole.IDispatch) error) error {
 // PutMouseEvents injects absolute mouse events into a running VM, waiting gap
 // between them so a press and its release read as a click, not a glitch.
 // Needs the VM to have an absolute pointing device (USB tablet); terrarium's
-// own VMs do. The API counts pixels from [1,1] while screenshots count from
-// [0,0], so the +1 keeps callers in screenshot coordinates.
+// own VMs do.
 func (c *Client) PutMouseEvents(vm string, events []MouseEvent, gap time.Duration) error {
 	return withMouse(vm, func(mouse *ole.IDispatch) error {
-		// Envs forked before terrarium set up USB tablets are PS/2-only, and
-		// absolute events would vanish without a trace. Fail with the fix.
 		if av, err := oleutil.GetProperty(mouse, "AbsoluteSupported"); err == nil {
 			if supported, isBool := av.Value().(bool); isBool && !supported {
-				return fmt.Errorf("VM %q has no absolute pointing device: re-fork the env, or power it off and run: VBoxManage modifyvm %s --mouse usbtablet", vm, vm)
+				return errNoTablet(vm)
 			}
 		}
 		for i, ev := range events {
 			if i > 0 && gap > 0 {
 				time.Sleep(gap)
 			}
+			x, y := ev.apiXY()
 			if _, err := oleutil.CallMethod(mouse, "PutMouseEventAbsolute",
-				ev.X+1, ev.Y+1, 0, 0, ev.Buttons); err != nil {
+				x, y, 0, 0, ev.Buttons); err != nil {
 				return fmt.Errorf("mouse event %d/%d: %w", i+1, len(events), err)
 			}
 		}

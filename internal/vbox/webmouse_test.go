@@ -131,6 +131,7 @@ func testWebMouse(endpoint string) *webMouse {
 		user:     webUser,
 		password: "pw",
 		ensure:   func() error { return errors.New("ensure should not be called") },
+		register: func() error { return errors.New("register should not be called") },
 	}
 }
 
@@ -221,13 +222,48 @@ func TestWebMouseLockFaultCleansUp(t *testing.T) {
 	}
 }
 
-func TestWebMouseBadPassword(t *testing.T) {
+// A service started with an older password heals: VBoxAuthSimple reads the
+// hash at every login, so re-registering and retrying is enough.
+func TestWebMouseStalePasswordReregisters(t *testing.T) {
+	f, srv := newFakeWebService(t)
+	f.password = "old"
+	w := testWebMouse(srv.URL)
+	registered := 0
+	w.register = func() error {
+		registered++
+		f.mu.Lock()
+		f.password = w.password
+		f.mu.Unlock()
+		return nil
+	}
+	if err := w.putEvents("trr-desk", []MouseEvent{{X: 1, Y: 1}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if registered != 1 || len(f.callsTo("IWebsessionManager_logon")) != 2 {
+		t.Errorf("want one re-register and one retry, got %d registers and %v", registered, f.callsTo("IWebsessionManager_logon"))
+	}
+}
+
+// Still refused after re-registering means the port is not ours to fix.
+func TestWebMouseRefusedAfterReregister(t *testing.T) {
 	_, srv := newFakeWebService(t)
 	w := testWebMouse(srv.URL)
 	w.password = "wrong"
+	w.register = func() error { return nil }
 	err := w.putEvents("trr-desk", []MouseEvent{{X: 1, Y: 1}}, 0)
-	if err == nil || !strings.Contains(err.Error(), "Invalid username or password") || !strings.Contains(err.Error(), "pkill vboxwebsrv") {
-		t.Fatalf("want the auth fault and the fix, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "Invalid username or password") || !strings.Contains(err.Error(), "pkill -f 'vboxwebsrv.*--port 42199'") {
+		t.Fatalf("want the auth fault and a fix that spares other vboxwebsrv instances, got %v", err)
+	}
+}
+
+func TestWebMouseReregisterFailure(t *testing.T) {
+	_, srv := newFakeWebService(t)
+	w := testWebMouse(srv.URL)
+	w.password = "wrong"
+	w.register = func() error { return errors.New("VBoxManage failed") }
+	err := w.putEvents("trr-desk", []MouseEvent{{X: 1, Y: 1}}, 0)
+	if err == nil || !strings.Contains(err.Error(), "re-registering") || !strings.Contains(err.Error(), "VBoxManage failed") {
+		t.Fatalf("want the re-register failure, got %v", err)
 	}
 }
 
@@ -353,5 +389,92 @@ func TestLoadOrCreateSecret(t *testing.T) {
 		t.Fatal(err)
 	} else if mode := fi.Mode().Perm(); os.PathSeparator == '/' && mode != 0o600 {
 		t.Errorf("secret file mode %v, want 0600", mode)
+	}
+}
+
+const procNetTCPSample = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:A4D7 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 41234 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 18000 1 0000000000000000 100 0 0 10 0
+   2: 0100007F:A4D8 0100007F:A4D7 01 00000000:00000000 00:00000000 00000000  1000        0 51234 1 0000000000000000 20 4 30 10 -1
+`
+
+func TestListenerUID(t *testing.T) {
+	cases := []struct {
+		name      string
+		table     string
+		port      int
+		wantUID   int
+		wantFound bool
+	}{
+		{"listener owned by another user", procNetTCPSample, 42199, 1001, true},
+		{"root listener on another port", procNetTCPSample, 3306, 0, true},
+		{"only an established connection to the port", procNetTCPSample, 42200, 0, false},
+		{"nothing there", "  sl  local_address rem_address   st\n", 42199, 0, false},
+		{"empty table", "", 42199, 0, false},
+	}
+	for _, c := range cases {
+		uid, found := listenerUID(c.table, c.port)
+		if uid != c.wantUID || found != c.wantFound {
+			t.Errorf("%s: got uid %d found %v, want %d %v", c.name, uid, found, c.wantUID, c.wantFound)
+		}
+	}
+}
+
+// A port held by someone else must not see the password at all.
+func TestWebMouseVouchStopsLogon(t *testing.T) {
+	f, srv := newFakeWebService(t)
+	w := testWebMouse(srv.URL)
+	w.vouch = func() error { return &foreignListenerError{port: webPort, uid: 1001} }
+	err := w.putEvents("trr-desk", []MouseEvent{{X: 1, Y: 1}}, 0)
+	var foreign *foreignListenerError
+	if !errors.As(err, &foreign) || !strings.Contains(err.Error(), "uid 1001") {
+		t.Fatalf("want the foreign listener error, got %v", err)
+	}
+	if n := len(f.methods()); n != 0 {
+		t.Errorf("sent %d calls to a foreign listener", n)
+	}
+}
+
+// The CLI and an MCP server can both reach first use at once; they must end up
+// with the same password, or one registers a hash the other never sends.
+func TestLoadOrCreateSecretConcurrent(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "terrarium")
+	const n = 16
+	got := make([]string, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got[i], errs[i] = loadOrCreateSecret(dir)
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatalf("caller %d: %v", i, errs[i])
+		}
+		if got[i] != got[0] {
+			t.Fatalf("caller %d got %q, caller 0 got %q", i, got[i], got[0])
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != secretFile {
+		t.Errorf("temp files left behind: %v", entries)
+	}
+}
+
+func TestLoadOrCreateSecretReplacesEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, secretFile), []byte("\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadOrCreateSecret(dir)
+	if err != nil || len(s) != 32 {
+		t.Fatalf("got %q, %v; want a fresh 32-char secret", s, err)
 	}
 }

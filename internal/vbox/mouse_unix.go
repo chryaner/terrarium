@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -50,7 +51,26 @@ func (c *Client) webMouse() (*webMouse, error) {
 		user:     webUser,
 		password: secret,
 		ensure:   func() error { return c.startWebService(dir, secret) },
+		register: func() error { return c.registerWebUser(secret) },
+		vouch:    vouchListener,
 	}, nil
+}
+
+// vouchListener refuses to log on to a port another user holds. Linux always
+// has /proc/net/tcp, so failing to read it there refuses too; other Unixes
+// have nothing to check against and log on as before.
+func vouchListener() error {
+	b, err := os.ReadFile("/proc/net/tcp")
+	if err != nil {
+		if runtime.GOOS == "linux" {
+			return fmt.Errorf("cannot tell who holds 127.0.0.1:%d, so terrarium will not send it a password: %w", webPort, err)
+		}
+		return nil
+	}
+	if uid, found := listenerUID(string(b), webPort); found && uid != os.Getuid() {
+		return &foreignListenerError{port: webPort, uid: uid}
+	}
+	return nil
 }
 
 // startWebService launches vboxwebsrv in its own session so it outlives this
@@ -62,8 +82,8 @@ func (c *Client) startWebService(dir, secret string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := c.run("setextradata", "global", "VBoxAuthSimple/users/"+webUser, authSimpleHash(secret)); err != nil {
-		return fmt.Errorf("registering terrarium with VBoxAuthSimple: %w", err)
+	if err := c.registerWebUser(secret); err != nil {
+		return err
 	}
 	logPath := filepath.Join(dir, "vboxwebsrv.log")
 	cmd := exec.Command(bin,
@@ -75,6 +95,8 @@ func (c *Client) startWebService(dir, secret string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", bin, err)
 	}
+	// Wait reaps the child if it exits while we live, so it never lingers as
+	// a zombie; buffered, so the goroutine ends even when nobody reads.
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
@@ -97,6 +119,14 @@ func (c *Client) startWebService(dir, secret string) error {
 		}
 	}
 	return fmt.Errorf("%s did not listen on %s within 15s; see %s", bin, addr, logPath)
+}
+
+// registerWebUser records the password's hash where VBoxAuthSimple looks.
+func (c *Client) registerWebUser(secret string) error {
+	if _, err := c.run("setextradata", "global", "VBoxAuthSimple/users/"+webUser, authSimpleHash(secret)); err != nil {
+		return fmt.Errorf("registering terrarium with VBoxAuthSimple: %w", err)
+	}
+	return nil
 }
 
 // webServiceBinary finds vboxwebsrv, which installs beside VBoxManage.
