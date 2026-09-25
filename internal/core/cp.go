@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/chryaner/terrarium/internal/sshx"
@@ -13,15 +14,17 @@ type copySpec struct {
 	Path string
 }
 
+// windowsHost switches on drive-letter parsing; a var so tests can pin it.
+var windowsHost = runtime.GOOS == "windows"
+
 // parseCopySpec reads scp's `<env>:<path>` notation. The awkward case is a
 // Windows host path: `C:\src` splits on a colon exactly like an env spec
-// does, so a single character before the colon is always a drive letter and
-// never an env. That costs one-letter env names their spec, which is the
-// right trade on a Windows-only host. Everything after the first colon is the
+// does, so on a Windows host a single character before the colon is always a
+// drive letter and never an env. Everything after the first colon is the
 // path, so `t1:C:/Users/x` names a Windows guest path.
-func parseCopySpec(s string) copySpec {
+func parseCopySpec(s string, windows bool) copySpec {
 	name, rest, ok := strings.Cut(s, ":")
-	if !ok || len(name) < 2 || !nameRe.MatchString(name) {
+	if !ok || !nameRe.MatchString(name) || (windows && len(name) < 2) {
 		return copySpec{Path: s}
 	}
 	return copySpec{Env: name, Path: rest}
@@ -39,7 +42,7 @@ type copyPlan struct {
 // name an env: the host cannot be one end of both halves of the transfer, and
 // guest-to-guest would need the host in the middle anyway.
 func planCopy(src, dst string) (copyPlan, error) {
-	s, d := parseCopySpec(src), parseCopySpec(dst)
+	s, d := parseCopySpec(src, windowsHost), parseCopySpec(dst, windowsHost)
 	switch {
 	case s.Env == "" && d.Env == "":
 		return copyPlan{}, fmt.Errorf("neither side names an env: use `terrarium cp <src> <env>:<path>` or `terrarium cp <env>:<path> <dst>`")
