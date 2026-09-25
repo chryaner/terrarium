@@ -47,7 +47,8 @@ optional fields - so the bytes always come from the distribution that
 maintains them, and a stale mirror is impossible by construction.
 
 Recipes are data. The built-in ones are embedded from `recipes/`, and a user's
-own are read from `%LOCALAPPDATA%\terrarium\recipes\`, where a file named
+own are read from `recipes/` in the data directory (`%LOCALAPPDATA%\terrarium`
+on Windows, `$XDG_DATA_HOME/terrarium` on Linux), where a file named
 after a built-in overrides it. That makes the two things people actually want
 cheap: contributing an image upstream is a one-file PR, and pointing an image
 at a private mirror needs no fork.
@@ -117,7 +118,7 @@ a Linux cloud image. That is the price of a real installer, and it is paid
 once per image: forks of the finished snapshot boot at the usual speed.
 
 Windows ISOs cannot be redistributed, so an `iso` recipe carries a relative
-`path` instead of a URL, resolved against `%LOCALAPPDATA%\terrarium\isos\`.
+`path` instead of a URL, resolved against `isos/` in the data directory.
 The shipped `win10` recipe means "whatever ISO the user saved as win10.iso
 there", and the error when it is missing says exactly where to put it.
 
@@ -182,17 +183,29 @@ credentialless adopted VM useful rather than merely creatable.
 
 Two constraints shape it:
 
-- **The mouse costs one COM call.** `controlvm` has `keyboardputstring`,
-  `keyboardputscancode` and `screenshotpng`, but nothing for the mouse:
-  pointer control exists only on the `IMouse` COM interface. VBoxManage
-  itself is just another COM client, so `click` and `scroll` go to the same
-  place directly: a short-lived, thread-locked session in
-  `internal/vbox/mouse_windows.go`, opened and released per call like a
-  VBoxManage invocation, so there is no connection to go stale when VBoxSVC
-  idles out. It is deliberately the only COM in the codebase, and it stays
-  behind the same driver seam. Absolute pointing needs a USB tablet device,
-  which most images do not ship, so `fork` adds one to every clone before
-  the clean snapshot.
+- **The mouse is the one call VBoxManage cannot make.** `controlvm` has
+  `keyboardputstring`, `keyboardputscancode` and `screenshotpng`, but nothing
+  for the mouse: pointer control exists only on the Main API's `IMouse`. On
+  Windows that API is COM, and VBoxManage itself is just another COM client,
+  so `click` and `scroll` go to the same place directly: a short-lived,
+  thread-locked session in `internal/vbox/mouse_windows.go`, opened and
+  released per call like a VBoxManage invocation, so there is no connection to
+  go stale when VBoxSVC idles out. It is deliberately the only COM in the
+  codebase. Absolute pointing needs a USB tablet device, which most images do
+  not ship, so `fork` adds one to every clone before the clean snapshot.
+- **On Linux the same calls go over SOAP.** Linux has XPCOM, which Go cannot
+  reach without cgo, so `internal/vbox/mouse_unix.go` talks to VirtualBox's
+  web service instead: the same lock, console, `IMouse` sequence as the COM
+  path, one HTTP request per method. terrarium runs its own `vboxwebsrv`,
+  started on first use and left running like VBoxSVC. It binds 127.0.0.1 on
+  port 42199, away from the default 18083 a user might already run for
+  something else, and authenticates with VBoxAuthSimple and a password
+  generated into the data directory: loopback alone would let any other user
+  on the machine drive this user's VMs. The auth library is a per-process
+  flag (`--authentication`), so the user's global `websrvauthlibrary`
+  setting is never touched; the only global change is the extradata key
+  holding the password's SHA-256. Both mouse paths stay behind the same
+  driver seam.
 - **No VRDE.** VirtualBox's own remote display would give a proper remote
   console, but the VRDP server ships in Oracle's proprietary extension pack,
   under a licence that is free only for personal use. Depending on it would
@@ -242,6 +255,13 @@ the password as a DPAPI `password 51:b:` blob - what "Remember me" produces,
 decryptable only by this user on this machine, and better than the plaintext
 already in `state.json`. It is simply no longer what gets launched. On
 non-Windows hosts DPAPI does not exist and that line is omitted.
+
+On Linux, `terrarium rdp` launches FreeRDP (`xfreerdp3`, `xfreerdp` or
+`sdl-freerdp3`) with `/cert:ignore`, for the same reason the .rdp file sets
+`authentication level:i:0`, and `/from-stdin:force` with the password written
+to its stdin: on the command line it would be readable by every local user in
+the process table. None of the Credential Manager or certificate seeding
+applies there.
 
 Scancodes are generated from the set 1 table in `internal/keys` rather than
 hand-written: a key's break code is its make code with bit 7 set, extended keys
@@ -349,7 +369,8 @@ Rules enforced by the driver. Each comes from an incident during the
    VM fail with a "locked" error. The driver retries the handful of operations
    that race in practice (`RestoreCurrent`, `SnapshotRestore`, `Unregister`) a
    few times with a short backoff. The state file has its own protection:
-   every save takes an exclusive lock file, re-reads the current file and
+   every save takes an exclusive lock file (`LockFileEx` on Windows,
+   `flock` on Linux), re-reads the current file and
    reapplies only this process's changes onto it, so a CLI command and a
    long-running MCP server interleave freely. The lock is held for the
    milliseconds of a write, never for the length of an operation.
@@ -400,8 +421,8 @@ Additional notes from bringing up the cloud-image path:
   from Go (manual reference counting, thread affinity, session locking), and
   it deepens the coupling the driver seam exists to contain. Vagrant drove
   VBoxManage in production for a decade; the CLI is enough - except for the
-  mouse, which the CLI simply does not have, so that one capability talks COM
-  and nothing else does.
+  mouse, which the CLI simply does not have, so that one capability talks to
+  the Main API (COM on Windows, SOAP on Linux) and nothing else does.
 - **QEMU/Hyper-V first?** The author's daily machines are VirtualBox on
   Windows (guests from XP to modern Linux). Build for the real workflow
   first; the driver seam keeps the door open.
