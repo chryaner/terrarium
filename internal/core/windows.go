@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chryaner/terrarium/internal/paths"
 	"github.com/chryaner/terrarium/internal/recipe"
 	"github.com/chryaner/terrarium/internal/seed"
 	"github.com/chryaner/terrarium/internal/sshx"
@@ -126,7 +127,7 @@ func isWindowsGuest(ostype string) bool {
 func resolveISOOSType(image, fromRecipe, detected string, progress func(string)) (string, error) {
 	switch {
 	case fromRecipe == "" && detected == "":
-		return "", fmt.Errorf("recipe %s: VirtualBox cannot tell what this ISO installs.\nadd the guest type to the recipe, e.g. `ostype: Windows10_64` (`VBoxManage list ostypes` lists them); copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ to override a shipped one", image)
+		return "", fmt.Errorf("recipe %s: VirtualBox cannot tell what this ISO installs.\nadd the guest type to the recipe, e.g. `ostype: Windows10_64` (`VBoxManage list ostypes` lists them); copy the recipe into %s to override a shipped one", image, paths.RecipeDirHint())
 	case fromRecipe == "":
 		progress("the ISO installs " + detected + " (" + ArchOf(detected) + ")")
 		return detected, nil
@@ -156,8 +157,8 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, gol
 	// meant to run - and the install is forty minutes gone before anyone
 	// finds out.
 	if c := badPostInstallChar(r.Password); c != "" {
-		return nil, fmt.Errorf("recipe %s: the password contains %s, which the guest's post-install script cannot carry.\nit is pasted into a batch file, so none of %s may appear in it - copy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ and use a password without them",
-			image, c, postInstallBadChars)
+		return nil, fmt.Errorf("recipe %s: the password contains %s, which the guest's post-install script cannot carry.\nit is pasted into a batch file, so none of %s may appear in it - copy the recipe into %s and use a password without them",
+			image, c, postInstallBadChars, paths.RecipeDirHint())
 	}
 	// The disc knows what it installs; the recipe only thinks it does. Wrong
 	// here means a 32-bit VM created for a 64-bit installer, which fails long
@@ -177,7 +178,7 @@ func (e *Engine) buildWindowsGolden(r recipe.Recipe, image, vmName, isoPath, gol
 	// would time out. A recipe that says WindowsXP must also say ssh: false.
 	if isNT5(r.OSType) {
 		if r.Key == "" {
-			return nil, fmt.Errorf("recipe %s: this Windows generation cannot install without a product key.\ncopy the recipe into %%LOCALAPPDATA%%\\terrarium\\recipes\\ and add yours as key:", image)
+			return nil, fmt.Errorf("recipe %s: this Windows generation cannot install without a product key.\ncopy the recipe into %s and add yours as key:", image, paths.RecipeDirHint())
 		}
 		if r.UseSSH() {
 			return nil, fmt.Errorf("recipe %s: %s has no built-in SSH server; the recipe must set ssh: false", image, r.OSType)

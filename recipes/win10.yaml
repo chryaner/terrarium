@@ -1,6 +1,7 @@
 # Windows 10 from your own installation ISO. Microsoft's media cannot be
 # redistributed, so download it from microsoft.com and save it as
-# %LOCALAPPDATA%\terrarium\isos\win10.iso.
+# isos/win10.iso in terrarium's data directory (%LOCALAPPDATA%\terrarium on
+# Windows, ~/.local/share/terrarium on Linux).
 name: win10
 path: win10.iso
 format: iso
