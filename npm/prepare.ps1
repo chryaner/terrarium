@@ -27,7 +27,8 @@ if ($LASTEXITCODE -ne 0) { throw "gh release download failed for v$Version" }
 
 $sums = @{}
 foreach ($line in Get-Content (Join-Path $tmp 'checksums.txt')) {
-    $hash, $file = $line -split '\s+', 2
+    if (-not $line.Trim()) { continue }
+    $hash, $file = $line.Trim() -split '\s+', 2
     $sums[$file.Trim()] = $hash.ToLower()
 }
 

@@ -298,9 +298,9 @@ Everything works the same, with these differences:
   use: bound to 127.0.0.1:42199, with VBoxAuthSimple and a password generated
   into the data directory, so other users on the machine cannot drive your
   VMs through it. It keeps running after the command, like VBoxSVC, and
-  `pkill vboxwebsrv` stops it. Your global VirtualBox settings are not
-  changed; the only addition is the global extradata key
-  `VBoxAuthSimple/users/terrarium`, which holds the password's hash.
+  `pkill -f 'vboxwebsrv.*--port 42199'` stops it. The only global change is
+  the extradata key `VBoxAuthSimple/users/terrarium`, which holds the
+  password's hash.
 - **RDP.** `terrarium rdp` opens `xfreerdp3`, `xfreerdp` or `sdl-freerdp3`,
   whichever is installed, and passes the password on stdin rather than the
   command line. With no graphical session it prints the `.rdp` file instead.
