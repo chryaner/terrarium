@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/chryaner/terrarium/internal/paths"
 	"github.com/chryaner/terrarium/recipes"
 	"gopkg.in/yaml.v3"
 )
@@ -103,26 +104,11 @@ func (r Recipe) UseTPM() bool { return r.TPM == nil || *r.TPM }
 func (r Recipe) UseSSH() bool       { return r.SSH == nil || *r.SSH }
 func (r Recipe) UseAdditions() bool { return r.Additions == nil || *r.Additions }
 
-// LocalDirName is where a user drops private recipes, under the terrarium
-// data directory.
-const LocalDirName = "recipes"
-
-func localDir() (string, error) {
-	base := os.Getenv("LOCALAPPDATA")
-	if base == "" {
-		var err error
-		if base, err = os.UserConfigDir(); err != nil {
-			return "", err
-		}
-	}
-	return filepath.Join(base, "terrarium", LocalDirName), nil
-}
-
 // Load returns every known recipe, sorted by name. A local recipe overrides a
 // built-in of the same name, so a user can pin their own URL or mirror for an
 // image terrarium ships.
 func Load() ([]Recipe, error) {
-	dir, err := localDir()
+	dir, err := paths.RecipeDir()
 	if err != nil {
 		return nil, err
 	}

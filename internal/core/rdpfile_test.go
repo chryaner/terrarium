@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/chryaner/terrarium/internal/paths"
 )
 
 func TestRenderRDPWithPassword(t *testing.T) {
@@ -50,7 +52,7 @@ func TestRenderRDPUsesCRLF(t *testing.T) {
 
 func rdpTestEngine(t *testing.T, g *Golden) *Engine {
 	t.Helper()
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	st, err := LoadState()
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +70,7 @@ func TestWriteRDPFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Resolved through the shared data dir, so LOCALAPPDATA moves it.
+	// Resolved through the shared data dir, so paths.BaseEnv moves it.
 	dir, err := dataDir()
 	if err != nil {
 		t.Fatal(err)
