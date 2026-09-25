@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 
+	"github.com/chryaner/terrarium/internal/paths"
 	"github.com/chryaner/terrarium/internal/vbox"
 )
 
@@ -25,6 +27,7 @@ type Check struct {
 // is a result, not a failure of the checking.
 func Doctor() []Check {
 	checks := vboxChecks()
+	checks = append(checks, hostChecks()...)
 	return append(checks, stateDirCheck(), sshClientCheck())
 }
 
@@ -66,7 +69,7 @@ func vboxChecks() []Check {
 		checks = append(checks, Check{
 			Name:   "VBoxSVC responding",
 			Detail: err.Error(),
-			Fix:    "try again in a moment; if it persists VirtualBox is wedged - close its GUI and kill VBoxSVC.exe",
+			Fix:    "try again in a moment; if it persists VirtualBox is wedged - close its GUI and " + killVBoxSVC(runtime.GOOS),
 		})
 	} else {
 		checks = append(checks, Check{
@@ -95,14 +98,14 @@ func stateDirCheck() Check {
 		return Check{
 			Name:   "state directory",
 			Detail: err.Error(),
-			Fix:    "set LOCALAPPDATA to a writable directory",
+			Fix:    "set " + paths.BaseEnv + " to a writable directory",
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return Check{
 			Name:   "state directory",
 			Detail: err.Error(),
-			Fix:    "create " + dir + " by hand, or point LOCALAPPDATA somewhere writable",
+			Fix:    "create " + dir + " by hand, or point " + paths.BaseEnv + " somewhere writable",
 		}
 	}
 	// The directory existing says nothing about whether we may write in it, so
@@ -126,8 +129,22 @@ func sshClientCheck() Check {
 			Name:     "ssh client",
 			Optional: true,
 			Detail:   "not on PATH. Only `terrarium ssh` needs it; `terrarium exec` and the MCP tools use a built-in SSH client and work without it",
-			Fix:      "install OpenSSH (Windows: Settings > Optional features > OpenSSH Client)",
+			Fix:      installSSH(runtime.GOOS),
 		}
 	}
 	return Check{Name: "ssh client", OK: true, Detail: path}
+}
+
+func killVBoxSVC(goos string) string {
+	if goos == "windows" {
+		return "kill VBoxSVC.exe"
+	}
+	return "run `pkill VBoxSVC`"
+}
+
+func installSSH(goos string) string {
+	if goos == "windows" {
+		return "install OpenSSH (Settings > Optional features > OpenSSH Client)"
+	}
+	return "install the OpenSSH client with your package manager (openssh-client on Debian and Ubuntu, openssh-clients on Fedora and RHEL)"
 }

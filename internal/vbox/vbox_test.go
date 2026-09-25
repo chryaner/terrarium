@@ -366,3 +366,20 @@ func TestParseSnapshotNames(t *testing.T) {
 		t.Errorf("missing names, got %v", names)
 	}
 }
+
+func TestInstallPathsPerOS(t *testing.T) {
+	for _, p := range installPaths("windows") {
+		if !strings.HasSuffix(p, `\VBoxManage.exe`) {
+			t.Errorf("windows candidate %q is not a VBoxManage.exe", p)
+		}
+	}
+	linux := installPaths("linux")
+	if len(linux) == 0 || linux[0] != "/usr/bin/VBoxManage" {
+		t.Errorf("linux candidates should start at the distro package path, got %v", linux)
+	}
+	for _, p := range linux {
+		if !strings.HasPrefix(p, "/") || strings.HasSuffix(p, ".exe") {
+			t.Errorf("linux candidate %q is not an absolute Unix path", p)
+		}
+	}
+}
