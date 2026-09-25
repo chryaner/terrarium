@@ -4,6 +4,7 @@ package sshx
 import (
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -31,14 +32,14 @@ func WaitReady(port int, timeout time.Duration) error {
 }
 
 // Args builds ssh client arguments for a fork. Host keys rotate with every
-// fork, so strict checking and known-hosts persistence are disabled.
-// UserKnownHostsFile=NUL is the Windows null device (host is Windows-only
-// for now).
+// fork, so strict checking and known-hosts persistence are disabled: a
+// remembered key would differ on the next fork of the same port, and OpenSSH
+// then drops password auth and port forwarding.
 func Args(port int, user, key string) []string {
 	a := []string{
 		"-p", strconv.Itoa(port),
 		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=NUL",
+		"-o", "UserKnownHostsFile=" + os.DevNull,
 		"-o", "LogLevel=ERROR",
 	}
 	if key != "" {
