@@ -32,25 +32,20 @@ var webEndpoint = fmt.Sprintf("http://127.0.0.1:%d/", webPort)
 // operation:
 //   - ensure brings the service up when nothing answers;
 //   - register writes this password's hash for VBoxAuthSimple, which reads
-//     it at every login, so a service holding an older one heals in place;
-//   - vouch, when set, runs before every logon and refuses a listener this
-//     user does not own, so the password never goes to a port another local
-//     user got to first.
+//     it at every login, so a service holding an older one heals in place.
+//
+// On Linux the soap client's connections are vouched for before any byte is
+// sent (see vouchingClient), so the password never reaches a port another
+// local user got to first.
 type webMouse struct {
 	soap     *soapClient
 	user     string
 	password string
 	ensure   func() error
 	register func() error
-	vouch    func() error
 }
 
 func (w *webMouse) logon() (string, error) {
-	if w.vouch != nil {
-		if err := w.vouch(); err != nil {
-			return "", err
-		}
-	}
 	return w.soap.call("IWebsessionManager_logon", arg("username", w.user), arg("password", w.password))
 }
 
@@ -61,19 +56,21 @@ type mouseRef string
 // second GUI would take), and hands fn its IMouse. It always unlocks and logs
 // off, so nothing is left for the service's session timeout to reap.
 func (w *webMouse) with(vm string, fn func(mouseRef) error) error {
+	// A connection refused for its owner is final: starting a service cannot
+	// take the port back, and retrying would only knock again.
+	var refused *untrustedListenerError
 	vbox, err := w.logon()
-	if isTransport(err) {
+	if isTransport(err) && !errors.As(err, &refused) {
 		if serr := w.ensure(); serr != nil {
 			return fmt.Errorf("VirtualBox web service is not running and could not be started: %w", serr)
 		}
 		vbox, err = w.logon()
 	}
+	if errors.As(err, &refused) {
+		return refused
+	}
 	if isTransport(err) {
 		return fmt.Errorf("VirtualBox web service at %s: %w", w.soap.endpoint, err)
-	}
-	var foreign *foreignListenerError
-	if errors.As(err, &foreign) {
-		return err
 	}
 	if err != nil {
 		if rerr := w.register(); rerr != nil {
@@ -213,28 +210,52 @@ func publishOnce(dir, path, content string) (bool, error) {
 	}
 }
 
-// foreignListenerError means the web service port belongs to another user.
-type foreignListenerError struct {
-	port, uid int
+// untrustedListenerError refuses a web service connection whose other end
+// this user cannot be shown to own.
+type untrustedListenerError struct {
+	port int
+	uid  int // -1 when the owner could not be found
 }
 
-func (e *foreignListenerError) Error() string {
+func (e *untrustedListenerError) Error() string {
+	if e.uid < 0 {
+		return fmt.Sprintf("cannot tell who accepted the connection to 127.0.0.1:%d, so terrarium will not send it a password", e.port)
+	}
 	return fmt.Sprintf("127.0.0.1:%d is held by another user (uid %d), not a vboxwebsrv of yours; terrarium will not send it a password. Find it with `ss -ltnp 'sport = :%d'`", e.port, e.uid, e.port)
 }
 
-// listenerUID finds who owns the IPv4 loopback listener on port in the text
-// of /proc/net/tcp. found is false when nothing listens there.
-func listenerUID(procNetTCP string, port int) (uid int, found bool) {
-	want := fmt.Sprintf("0100007F:%04X", port)
-	for _, line := range strings.Split(procNetTCP, "\n") {
-		f := strings.Fields(line)
-		// sl local rem st tx:rx tr:when retrnsmt uid ...; 0A is LISTEN.
-		if len(f) < 8 || f[1] != want || f[3] != "0A" {
-			continue
-		}
-		if n, err := strconv.Atoi(f[7]); err == nil {
-			return n, true
+// Loopback as /proc/net/tcp prints it, and as /proc/net/tcp6 prints the
+// v4-mapped address a dual-stack listener sees.
+const (
+	procLoopback4       = "0100007F"
+	procLoopback4Mapped = "0000000000000000FFFF00000100007F"
+)
+
+// peerUID finds who owns the server end of the loopback connection from
+// clientPort to serverPort, in the text of /proc/net/tcp and /proc/net/tcp6.
+// A socket accepted by a listener carries the listener's uid, so this names
+// the real peer however it was bound (127.0.0.1, 0.0.0.0 or ::), and, being
+// read after the connection exists, leaves no window to swap listeners.
+func peerUID(tables []string, serverPort, clientPort int) (uid int, found bool) {
+	local := fmt.Sprintf(":%04X", serverPort)
+	remote := map[string]bool{
+		fmt.Sprintf("%s:%04X", procLoopback4, clientPort):       true,
+		fmt.Sprintf("%s:%04X", procLoopback4Mapped, clientPort): true,
+	}
+	for _, table := range tables {
+		for _, line := range strings.Split(table, "\n") {
+			f := strings.Fields(line)
+			// sl local rem st tx:rx tr:when retrnsmt uid ...; 01 is
+			// ESTABLISHED, which also rules out a TIME_WAIT leftover on the
+			// same ports.
+			if len(f) < 8 || !strings.HasSuffix(f[1], local) || !remote[f[2]] || f[3] != "01" {
+				continue
+			}
+			if n, err := strconv.Atoi(f[7]); err == nil {
+				return n, true
+			}
 		}
 	}
 	return 0, false
 }
+

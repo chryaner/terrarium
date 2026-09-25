@@ -297,7 +297,8 @@ Everything works the same, with these differences:
   VirtualBox's web service. terrarium starts its own `vboxwebsrv` on first
   use: bound to 127.0.0.1:42199, with VBoxAuthSimple and a password generated
   into the data directory, so other users on the machine cannot drive your
-  VMs through it. It keeps running after the command, like VBoxSVC, and
+  VMs through it, and it refuses to send that password to a port another
+  user holds. It keeps running after the command, like VBoxSVC, and
   `pkill -f 'vboxwebsrv.*--port 42199'` stops it. The only global change is
   the extradata key `VBoxAuthSimple/users/terrarium`, which holds the
   password's hash.

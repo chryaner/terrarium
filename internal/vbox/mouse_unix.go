@@ -3,6 +3,7 @@
 package vbox
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -47,28 +48,55 @@ func (c *Client) webMouse() (*webMouse, error) {
 		return nil, fmt.Errorf("web service password: %w", err)
 	}
 	return &webMouse{
-		soap:     &soapClient{endpoint: webEndpoint, http: &http.Client{Timeout: c.Timeout}},
+		soap:     &soapClient{endpoint: webEndpoint, http: vouchingClient(c.Timeout)},
 		user:     webUser,
 		password: secret,
 		ensure:   func() error { return c.startWebService(dir, secret) },
 		register: func() error { return c.registerWebUser(secret) },
-		vouch:    vouchListener,
 	}, nil
 }
 
-// vouchListener refuses to log on to a port another user holds. Linux always
-// has /proc/net/tcp, so failing to read it there refuses too; other Unixes
-// have nothing to check against and log on as before.
-func vouchListener() error {
-	b, err := os.ReadFile("/proc/net/tcp")
-	if err != nil {
-		if runtime.GOOS == "linux" {
-			return fmt.Errorf("cannot tell who holds 127.0.0.1:%d, so terrarium will not send it a password: %w", webPort, err)
-		}
-		return nil
+// vouchingClient is an HTTP client that checks who accepted each connection
+// before using it, so the logon's password only ever goes to this user's own
+// vboxwebsrv. Only Linux has /proc/net to ask; terrarium ships for no other
+// Unix, and there the check is skipped.
+func vouchingClient(timeout time.Duration) *http.Client {
+	dialer := &net.Dialer{Timeout: timeout}
+	return &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+				conn, err := dialer.DialContext(ctx, network, addr)
+				if err != nil || runtime.GOOS != "linux" {
+					return conn, err
+				}
+				if err := vouchPeer(conn); err != nil {
+					conn.Close()
+					return nil, err
+				}
+				return conn, nil
+			},
+		},
 	}
-	if uid, found := listenerUID(string(b), webPort); found && uid != os.Getuid() {
-		return &foreignListenerError{port: webPort, uid: uid}
+}
+
+func vouchPeer(conn net.Conn) error {
+	local, ok := conn.LocalAddr().(*net.TCPAddr)
+	if !ok {
+		return &untrustedListenerError{port: webPort, uid: -1}
+	}
+	var tables []string
+	for _, p := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
+		if b, err := os.ReadFile(p); err == nil {
+			tables = append(tables, string(b))
+		}
+	}
+	uid, found := peerUID(tables, webPort, local.Port)
+	switch {
+	case !found:
+		return &untrustedListenerError{port: webPort, uid: -1}
+	case uid != os.Getuid():
+		return &untrustedListenerError{port: webPort, uid: uid}
 	}
 	return nil
 }

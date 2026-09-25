@@ -201,7 +201,10 @@ Two constraints shape it:
   port 42199, away from the default 18083 a user might already run for
   something else, and authenticates with VBoxAuthSimple and a password
   generated into the data directory: loopback alone would let any other user
-  on the machine drive this user's VMs. The auth library is a per-process
+  on the machine drive this user's VMs. Before a connection carries the
+  password, terrarium looks up who accepted it in `/proc/net/tcp` and `tcp6`
+  and refuses any peer this user does not own, so another user who binds the
+  port first, on any address, gets nothing. The auth library is a per-process
   flag (`--authentication`), so the user's global `websrvauthlibrary`
   setting is never touched; the only global change is the extradata key
   holding the password's SHA-256. Both mouse paths stay behind the same
