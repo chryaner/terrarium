@@ -456,7 +456,7 @@ func (e *Engine) attachSeed(vm, isoPath string, progress func(string)) (ctrl str
 // download streams to a .partial file first: an interrupted or corrupt
 // transfer must never be mistaken for a cached image on the next run.
 func download(url, dst, wantSHA256 string, progress func(string)) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
 	// No overall timeout: a 6 GB ISO legitimately takes a long time. The
