@@ -98,3 +98,12 @@ func TestHasDisplay(t *testing.T) {
 		t.Error("either variable means there is somewhere to draw")
 	}
 }
+
+// The domain prompt comes first and must get an empty line, or the password
+// is taken as the domain and the login fails.
+func TestFreeRDPStdinAnswersDomainFirst(t *testing.T) {
+	lines := strings.Split(freerdpStdin("Terrarium1!"), "\n")
+	if len(lines) != 3 || lines[0] != "" || lines[1] != "Terrarium1!" || lines[2] != "" {
+		t.Errorf("stdin lines = %q, want an empty domain, the password, then end of input", lines)
+	}
+}

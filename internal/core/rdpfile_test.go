@@ -130,9 +130,15 @@ func TestRemoveRDPFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	log := RDPClientLog(path)
+	if err := os.WriteFile(log, []byte("client output"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	removeRDPFile("desk")
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("file should be gone, stat gave %v", err)
+	for _, p := range []string{path, log} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Errorf("%s should be gone, stat gave %v", p, err)
+		}
 	}
 	// Removing what is not there is not an error.
 	removeRDPFile("desk")

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -166,6 +167,14 @@ func freerdpCommandArgs(addr, user string, withPassword bool, display rdpDisplay
 	return append(args, display.freerdpArgs()...)
 }
 
+// freerdpStdin is what FreeRDP reads under /from-stdin:force. With /u: given
+// it skips the username prompt but still asks for a domain before the
+// password (client_cli_authenticate_raw, FreeRDP 2 and 3), so an empty line
+// answers that first: local accounts have none.
+func freerdpStdin(password string) string {
+	return "\n" + password + "\n"
+}
+
 // hasDisplay reports whether a graphical client has anywhere to draw.
 func hasDisplay(getenv func(string) string) bool {
 	return getenv("DISPLAY") != "" || getenv("WAYLAND_DISPLAY") != ""
@@ -176,7 +185,7 @@ func launchFreeRDP(e *core.Engine, env, addr, path string, display rdpDisplay) e
 	if bin == "" || !hasDisplay(os.Getenv) {
 		why := "no graphical session"
 		if bin == "" {
-			why = "FreeRDP is not installed (xfreerdp3 or xfreerdp)"
+			why = "FreeRDP is not installed (" + strings.Join(freerdpClients, ", ") + ")"
 		}
 		fmt.Printf("rdp file: %s (not opening a client: %s)\n", path, why)
 		return nil
@@ -193,6 +202,15 @@ func launchFreeRDP(e *core.Engine, env, addr, path string, display rdpDisplay) e
 		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 		return c.Run()
 	}
+	// Its output would land on this terminal after the command returns, so it
+	// goes to a log beside the .rdp file, where a failed login can be read.
+	logPath := core.RDPClientLog(path)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+	c.Stdout, c.Stderr = logFile, logFile
 	stdin, err := c.StdinPipe()
 	if err != nil {
 		return err
@@ -201,12 +219,12 @@ func launchFreeRDP(e *core.Engine, env, addr, path string, display rdpDisplay) e
 		fmt.Printf("rdp file: %s (could not launch %s: %v)\n", path, bin, err)
 		return nil
 	}
-	// A pipe buffers far more than one password, so this returns at once;
+	// A pipe buffers far more than this, so the write returns at once;
 	// closing it tells FreeRDP the input is complete.
-	fmt.Fprintln(stdin, password)
+	io.WriteString(stdin, freerdpStdin(password))
 	stdin.Close()
 	// Not waited on, like mstsc: the session window belongs to the user now.
-	fmt.Printf("opening %s (logged in as %s)\n", bin, user)
+	fmt.Printf("opening %s (logged in as %s; its output goes to %s)\n", bin, user, logPath)
 	return nil
 }
 
