@@ -17,12 +17,16 @@ the time it takes to read this.
 
 ## Get started
 
-You need a Windows host with [VirtualBox](https://www.virtualbox.org/) 7.x.
-Do not have it yet?
+You need an x64 Windows or Linux host with
+[VirtualBox](https://www.virtualbox.org/) 7.x. Do not have it yet?
 
 ```powershell
 winget install Oracle.VirtualBox
 ```
+
+On Linux, install the `virtualbox-7.x` package from
+[Oracle's repository](https://www.virtualbox.org/wiki/Linux_Downloads); see
+[Linux hosts](#linux-hosts) for what differs.
 
 ### With Claude Code
 
@@ -208,15 +212,15 @@ Minesweeper recording above shows. On connect the server tells the agent to run
 - "Install our app on the Windows env and screenshot each step."
 
 For Windows guests with SSH, `terrarium rdp` opens a full desktop already
-logged in.
+logged in: mstsc on a Windows host, FreeRDP on Linux.
 
 ## Install
 
 [Get started](#get-started) has the two fast paths. Everything else about
-installing is here. terrarium is a single Windows binary; VirtualBox 7.x is
-the only thing it needs on the host.
+installing is here. terrarium is a single binary for Windows and Linux;
+VirtualBox 7.x is the only thing it needs on the host.
 
-### Scoop (no Node needed)
+### Scoop (Windows, no Node needed)
 
 If you do not have [Scoop](https://scoop.sh) yet, from a normal (non-admin)
 PowerShell:
@@ -244,9 +248,15 @@ $env:Path = [Environment]::GetEnvironmentVariable('Path','User') + ';' + [Enviro
 The Scoop binary is the same MCP server:
 `claude mcp add -s user terrarium -- terrarium mcp`.
 
+### Release archive (Linux, no Node needed)
+
+Each [release](https://github.com/chryaner/terrarium/releases) carries a
+`terrarium_<version>_linux_amd64.tar.gz` with the binary inside; put it
+anywhere on your `PATH`.
+
 ### Go
 
-```powershell
+```console
 go install github.com/chryaner/terrarium/cmd/terrarium@latest
 ```
 
@@ -274,6 +284,32 @@ Any client that launches stdio servers takes the same command. In JSON form:
 
 `npm update -g terrarium-mcp` or `scoop update terrarium`. `npx -y` picks up
 new versions on its own. `terrarium version` prints what you have.
+
+### Linux hosts
+
+Everything works the same, with these differences:
+
+- **Data directory.** State, images, keys, local recipes and ISOs live in
+  `$XDG_DATA_HOME/terrarium`, which is `~/.local/share/terrarium` by default.
+  On Windows it is `%LOCALAPPDATA%\terrarium`. `terrarium doctor` prints it.
+- **Mouse.** VBoxManage has no mouse command, and the COM API terrarium uses
+  on Windows does not exist on Linux, so `click` and `scroll` go through
+  VirtualBox's web service. terrarium starts its own `vboxwebsrv` on first
+  use: bound to 127.0.0.1:42199, with VBoxAuthSimple and a password generated
+  into the data directory, so other users on the machine cannot drive your
+  VMs through it. It keeps running after the command, like VBoxSVC, and
+  `pkill vboxwebsrv` stops it. Your global VirtualBox settings are not
+  changed; the only addition is the global extradata key
+  `VBoxAuthSimple/users/terrarium`, which holds the password's hash.
+- **RDP.** `terrarium rdp` opens `xfreerdp3`, `xfreerdp` or `sdl-freerdp3`,
+  whichever is installed, and passes the password on stdin rather than the
+  command line. With no graphical session it prints the `.rdp` file instead.
+- **Kernel modules.** `doctor` checks that `vboxdrv` is loaded, and warns when
+  KVM is, because KVM can hold the CPU's virtualization extensions and make
+  every VM fail to start.
+- **Not in WSL2 or a container.** VirtualBox needs its kernel driver and the
+  CPU's virtualization extensions, which neither provides. Run terrarium on
+  the Windows side instead.
 
 ### git-bash
 
@@ -326,7 +362,9 @@ There is no Windows cloud image and Microsoft's media cannot be redistributed,
 so you download the ISO once and terrarium runs the real installer unattended:
 
 1. Download the installation ISO from Microsoft.
-2. Save it in `%LOCALAPPDATA%\terrarium\isos\`, named for the recipe:
+2. Save it in the `isos` folder of terrarium's data directory
+   (`%LOCALAPPDATA%\terrarium\isos\` on Windows,
+   `~/.local/share/terrarium/isos/` on Linux), named for the recipe:
    `win10.iso`, `winxp.iso`.
 3. `terrarium get win10`. Fully unattended: about ten minutes for win10, seven
    for XP.
@@ -367,7 +405,7 @@ same file builds an equivalent machine from their own base, so no disk image
 (and no Windows license) ever changes hands.
 
 ```yaml
-# %LOCALAPPDATA%\terrarium\recipes\team-dev.yaml
+# <data directory>/recipes/team-dev.yaml
 name: team-dev
 from: debian-12
 setup:
@@ -407,9 +445,10 @@ running machine, including a golden or a VM terrarium does not manage.
 
 ## What it is not
 
-- **Not cross-platform yet.** The host must be Windows with VirtualBox. Every
-  hypervisor call sits behind one package by design, so a QEMU or Hyper-V driver
-  is a planned door, not a promise.
+- **Not on every host.** The host must be x64 Windows or Linux with
+  VirtualBox; macOS has had no testing. Every hypervisor call sits behind one
+  package by design, so a QEMU or Hyper-V driver is a planned door, not a
+  promise.
 - **Not for production.** Forks are cattle for development and testing.
 - **Not a secrets manager.** A Windows golden's password is stored in plain text
   locally and is briefly visible on the `VBoxManage` command line during the
