@@ -72,5 +72,12 @@ func (e *Engine) WriteRDPFile(envName string, hostPort int) (string, error) {
 func removeRDPFile(envName string) {
 	if path, err := rdpFilePath(envName); err == nil {
 		os.Remove(path)
+		os.Remove(RDPClientLog(path))
 	}
+}
+
+// RDPClientLog is where a launched RDP client's output goes, beside the
+// .rdp file it was written for.
+func RDPClientLog(rdpFile string) string {
+	return strings.TrimSuffix(rdpFile, ".rdp") + ".client.log"
 }
