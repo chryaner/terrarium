@@ -1,10 +1,12 @@
 package vbox
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -392,46 +394,72 @@ func TestLoadOrCreateSecret(t *testing.T) {
 	}
 }
 
+// Client port 0xB000 (45056) talking to the web service port 0xA4D7 (42199).
 const procNetTCPSample = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
-   0: 0100007F:A4D7 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 41234 1 0000000000000000 100 0 0 10 0
-   1: 0100007F:0CEA 00000000:0000 0A 00000000:00000000 00:00000000 00000000     0        0 18000 1 0000000000000000 100 0 0 10 0
-   2: 0100007F:A4D8 0100007F:A4D7 01 00000000:00000000 00:00000000 00000000  1000        0 51234 1 0000000000000000 20 4 30 10 -1
+   0: 00000000:A4D7 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 41234 1 0000000000000000 100 0 0 10 0
+   1: 0100007F:A4D7 0100007F:B000 01 00000000:00000000 00:00000000 00000000  1001        0 41235 1 0000000000000000 20 4 30 10 -1
+   2: 0100007F:B000 0100007F:A4D7 01 00000000:00000000 00:00000000 00000000  1000        0 51234 1 0000000000000000 20 4 30 10 -1
+   3: 0100007F:A4D7 0100007F:B001 06 00000000:00000000 03:00000F9E 00000000     0        0 0 3 0000000000000000
 `
 
-func TestListenerUID(t *testing.T) {
+// The same connection accepted by a dual-stack listener bound to ::.
+const procNetTCP6Sample = `  sl  local_address                         remote_address                        st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 00000000000000000000000000000000:A4D7 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1002        0 61234 1 0000000000000000 100 0 0 10 0
+   1: 0000000000000000FFFF00000100007F:A4D7 0000000000000000FFFF00000100007F:B002 01 00000000:00000000 00:00000000 00000000  1002        0 61235 1 0000000000000000 20 4 30 10 -1
+`
+
+func TestPeerUID(t *testing.T) {
 	cases := []struct {
-		name      string
-		table     string
-		port      int
-		wantUID   int
-		wantFound bool
+		name       string
+		tables     []string
+		clientPort int
+		wantUID    int
+		wantFound  bool
 	}{
-		{"listener owned by another user", procNetTCPSample, 42199, 1001, true},
-		{"root listener on another port", procNetTCPSample, 3306, 0, true},
-		{"only an established connection to the port", procNetTCPSample, 42200, 0, false},
-		{"nothing there", "  sl  local_address rem_address   st\n", 42199, 0, false},
-		{"empty table", "", 42199, 0, false},
+		// A wildcard listener's accepted socket still shows the loopback
+		// address it was reached on, so it is found like any other.
+		{"accepted by a 0.0.0.0 listener of another user", []string{procNetTCPSample}, 0xB000, 1001, true},
+		{"accepted by a dual-stack :: listener", []string{procNetTCPSample, procNetTCP6Sample}, 0xB002, 1002, true},
+		// Our own client socket has the ports the other way round.
+		{"our own end is not the peer", []string{procNetTCPSample}, 0xA4D7, 0, false},
+		{"TIME_WAIT leftover on the same ports", []string{procNetTCPSample}, 0xB001, 0, false},
+		{"no such connection", []string{procNetTCPSample, procNetTCP6Sample}, 0xB0FF, 0, false},
+		{"nothing readable", nil, 0xB000, 0, false},
 	}
 	for _, c := range cases {
-		uid, found := listenerUID(c.table, c.port)
+		uid, found := peerUID(c.tables, webPort, c.clientPort)
 		if uid != c.wantUID || found != c.wantFound {
 			t.Errorf("%s: got uid %d found %v, want %d %v", c.name, uid, found, c.wantUID, c.wantFound)
 		}
 	}
 }
 
-// A port held by someone else must not see the password at all.
-func TestWebMouseVouchStopsLogon(t *testing.T) {
+// A connection refused for its owner must stop everything: no password, no
+// attempt to start a service on a port someone else holds.
+func TestWebMouseUntrustedListenerStops(t *testing.T) {
 	f, srv := newFakeWebService(t)
 	w := testWebMouse(srv.URL)
-	w.vouch = func() error { return &foreignListenerError{port: webPort, uid: 1001} }
+	w.soap.http = &http.Client{Transport: &http.Transport{
+		DialContext: func(context.Context, string, string) (net.Conn, error) {
+			return nil, &untrustedListenerError{port: webPort, uid: 1001}
+		},
+	}}
 	err := w.putEvents("trr-desk", []MouseEvent{{X: 1, Y: 1}}, 0)
-	var foreign *foreignListenerError
-	if !errors.As(err, &foreign) || !strings.Contains(err.Error(), "uid 1001") {
-		t.Fatalf("want the foreign listener error, got %v", err)
+	var refused *untrustedListenerError
+	if !errors.As(err, &refused) || !strings.Contains(err.Error(), "uid 1001") {
+		t.Fatalf("want the untrusted listener error, got %v", err)
 	}
 	if n := len(f.methods()); n != 0 {
-		t.Errorf("sent %d calls to a foreign listener", n)
+		t.Errorf("%d calls reached the service", n)
+	}
+}
+
+func TestUntrustedListenerMessages(t *testing.T) {
+	if msg := (&untrustedListenerError{port: webPort, uid: -1}).Error(); !strings.Contains(msg, "cannot tell") {
+		t.Errorf("unknown owner: %q", msg)
+	}
+	if msg := (&untrustedListenerError{port: webPort, uid: 1001}).Error(); !strings.Contains(msg, "uid 1001") || !strings.Contains(msg, "ss -ltnp") {
+		t.Errorf("foreign owner: %q", msg)
 	}
 }
 
