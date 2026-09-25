@@ -1,7 +1,9 @@
 package paths
 
 import (
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -50,5 +52,25 @@ func TestLinuxFallbackIsXDGDefault(t *testing.T) {
 	}
 	if !strings.HasSuffix(got, filepath.Join(".local", "share")) {
 		t.Errorf("got %q, want a path ending in .local/share", got)
+	}
+}
+
+func TestMakePrivate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "terrarium")
+	if err := MakePrivate(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := MakePrivate(dir); err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o700 {
+		t.Errorf("mode %v, want 0700", fi.Mode().Perm())
 	}
 }

@@ -101,7 +101,7 @@ func stateDirCheck() Check {
 			Fix:    "set " + paths.BaseEnv + " to a writable directory",
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := paths.MakePrivate(dir); err != nil {
 		return Check{
 			Name:   "state directory",
 			Detail: err.Error(),

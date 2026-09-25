@@ -191,7 +191,7 @@ func (s *State) mergeInto(base *State) {
 // truncate the only record of every VM terrarium owns.
 func (s *State) Save() error {
 	dir := filepath.Dir(s.path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := paths.MakePrivate(dir); err != nil {
 		return err
 	}
 	unlock, err := lockState(filepath.Join(dir, lockFileName), lockTimeout)
