@@ -258,4 +258,3 @@ func peerUID(tables []string, serverPort, clientPort int) (uid int, found bool) 
 	}
 	return 0, false
 }
-
