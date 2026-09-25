@@ -8,30 +8,45 @@ import (
 func TestParseCopySpec(t *testing.T) {
 	cases := []struct {
 		in       string
+		windows  bool
 		env, pth string
 	}{
-		{"t1:/tmp/x", "t1", "/tmp/x"},
-		{"dev-box:/home/terrarium", "dev-box", "/home/terrarium"},
+		{"t1:/tmp/x", true, "t1", "/tmp/x"},
+		{"dev-box:/home/terrarium", true, "dev-box", "/home/terrarium"},
 		// Everything after the first colon is the path, so a Windows guest
 		// path survives intact.
-		{"win:C:/Users/terrarium/x", "win", "C:/Users/terrarium/x"},
-		{"./notes.txt", "", "./notes.txt"},
-		{`C:\src\notes.txt`, "", `C:\src\notes.txt`},
-		{"c:/src/notes.txt", "", "c:/src/notes.txt"},
-		{"notes.txt", "", "notes.txt"},
-		{`\\server\share\x`, "", `\\server\share\x`},
+		{"win:C:/Users/terrarium/x", true, "win", "C:/Users/terrarium/x"},
+		{"./notes.txt", true, "", "./notes.txt"},
+		{`C:\src\notes.txt`, true, "", `C:\src\notes.txt`},
+		{"c:/src/notes.txt", true, "", "c:/src/notes.txt"},
+		{"notes.txt", true, "", "notes.txt"},
+		{`\\server\share\x`, true, "", `\\server\share\x`},
 		// Not an env name, so not an env spec.
-		{"../rel:x", "", "../rel:x"},
+		{"../rel:x", true, "", "../rel:x"},
+		// A Unix host has no drive letters, so a one-letter env is an env.
+		{"a:/tmp/x", false, "a", "/tmp/x"},
+		{"t1:/tmp/x", false, "t1", "/tmp/x"},
+		{"/home/me/notes.txt", false, "", "/home/me/notes.txt"},
+		{"../rel:x", false, "", "../rel:x"},
 	}
 	for _, c := range cases {
-		got := parseCopySpec(c.in)
+		got := parseCopySpec(c.in, c.windows)
 		if got.Env != c.env || got.Path != c.pth {
-			t.Errorf("parseCopySpec(%q) = %+v, want env %q path %q", c.in, got, c.env, c.pth)
+			t.Errorf("parseCopySpec(%q, windows=%v) = %+v, want env %q path %q", c.in, c.windows, got, c.env, c.pth)
 		}
 	}
 }
 
+// pinWindowsHost makes planCopy parse like the given host for one test.
+func pinWindowsHost(t *testing.T, windows bool) {
+	t.Helper()
+	old := windowsHost
+	windowsHost = windows
+	t.Cleanup(func() { windowsHost = old })
+}
+
 func TestPlanCopyDirection(t *testing.T) {
+	pinWindowsHost(t, true)
 	push, err := planCopy(`C:\src\a.txt`, "t1:/tmp/a.txt")
 	if err != nil {
 		t.Fatal(err)
@@ -65,5 +80,16 @@ func TestPlanCopyRejects(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), c.wantErr) {
 			t.Errorf("%s: got %v, want %q", c.name, err, c.wantErr)
 		}
+	}
+}
+
+func TestPlanCopyOneLetterEnvOnUnixHost(t *testing.T) {
+	pinWindowsHost(t, false)
+	plan, err := planCopy("/home/me/a.txt", "a:/tmp/a.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !plan.Push || plan.Env != "a" || plan.Local != "/home/me/a.txt" || plan.Remote != "/tmp/a.txt" {
+		t.Errorf("plan = %+v", plan)
 	}
 }
