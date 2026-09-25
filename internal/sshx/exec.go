@@ -104,7 +104,7 @@ func execStreams(port int, user, password, keyPath, command string, stdin io.Rea
 	// A nil stdin stays nil. Defaulting it to os.Stdin would make the ssh
 	// client copy from the JSON-RPC transport under `terrarium mcp`, so the
 	// first exec would eat protocol frames; script mode passes the script it
-	// wants read and nothing else. Interactive shells go through ssh.exe in
+	// wants read and nothing else. Interactive shells go through the ssh binary in
 	// cli/sshcmd.go.
 	if stdin != nil {
 		sess.Stdin = stdin

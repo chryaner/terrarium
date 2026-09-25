@@ -42,7 +42,7 @@ func authMethods(password, keyPath string) ([]ssh.AuthMethod, error) {
 }
 
 // Dial opens an SSH connection to a fork's forwarded port on loopback. The Go
-// client rather than ssh.exe, so password auth works non-interactively.
+// client rather than the ssh binary, so password auth works non-interactively.
 // Host key checking is off: fork host keys rotate on every clone.
 func Dial(port int, user, password, keyPath string) (*ssh.Client, error) {
 	auth, err := authMethods(password, keyPath)

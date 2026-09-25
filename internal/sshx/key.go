@@ -44,7 +44,7 @@ func EnsureKey(path, comment string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// 0600 is advisory on Windows; the file lands in LOCALAPPDATA either way.
+	// 0600 is advisory on Windows, where the per-user data directory protects it.
 	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
 		return "", err
 	}

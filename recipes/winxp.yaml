@@ -1,5 +1,6 @@
-# Windows XP from your own installation ISO, saved as
-# %LOCALAPPDATA%\terrarium\isos\winxp.iso. XP predates PowerShell and OpenSSH,
+# Windows XP from your own installation ISO, saved as isos/winxp.iso in
+# terrarium's data directory (%LOCALAPPDATA%\terrarium on Windows,
+# ~/.local/share/terrarium on Linux). XP predates PowerShell and OpenSSH,
 # so the golden is credless: forks are driven with screenshot, click, type and
 # keys instead of exec, and the installer signals completion by shutting the
 # machine down.
@@ -8,7 +9,7 @@ path: winxp.iso
 format: iso
 ostype: WindowsXP
 # XP setup cannot proceed without a product key and terrarium cannot ship one.
-# Copy this file to %LOCALAPPDATA%\terrarium\recipes\winxp.yaml and add yours:
+# Copy this file to recipes/winxp.yaml in the data directory and add yours:
 # key: XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
 # The installer insists on creating an account; the credless golden never
 # records these credentials, so the value does not matter.

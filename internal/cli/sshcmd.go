@@ -18,7 +18,7 @@ var sshCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
-		// ssh.exe prompts for the password itself when no key is set
+		// ssh prompts for the password itself when no key is set
 		port, user, _, key, err := e.SSHTarget(args[0])
 		if err != nil {
 			return err

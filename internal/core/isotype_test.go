@@ -3,6 +3,8 @@ package core
 import (
 	"strings"
 	"testing"
+
+	"github.com/chryaner/terrarium/internal/paths"
 )
 
 func TestResolveISOOSType(t *testing.T) {
@@ -63,11 +65,13 @@ func TestResolveISOOSType(t *testing.T) {
 // to name the fix: the alternative is a forty-minute install of the wrong
 // thing.
 func TestResolveISOOSTypeNeedsSomething(t *testing.T) {
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	_, err := resolveISOOSType("win10", "", "", func(string) {})
 	if err == nil {
 		t.Fatal("no recipe type and no detection should fail")
 	}
-	for _, want := range []string{"ostype:", "recipes"} {
+	// The real directory for this host, not one OS's spelling of it.
+	for _, want := range []string{"ostype:", paths.RecipeDirHint()} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q: %v", want, err)
 		}
