@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/chryaner/terrarium/internal/paths"
 )
 
 func writeRecipe(t *testing.T, dir, name, body string) {
@@ -182,7 +184,7 @@ func TestRejectsNameFileMismatch(t *testing.T) {
 }
 
 func TestLookupAndNames(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 
 	r, err := Lookup("alma-9")
 	if err != nil {
@@ -209,8 +211,8 @@ func TestLookupAndNames(t *testing.T) {
 // Lookup reads the user's own recipe directory, not just the embedded set.
 func TestLookupSeesLocalDir(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("LOCALAPPDATA", home)
-	writeRecipe(t, filepath.Join(home, "terrarium", LocalDirName), "private.yaml",
+	t.Setenv(paths.BaseEnv, home)
+	writeRecipe(t, filepath.Join(home, "terrarium", "recipes"), "private.yaml",
 		"name: private\nurl: https://example.invalid/private.qcow2\nformat: qcow2\n")
 
 	r, err := Lookup("private")

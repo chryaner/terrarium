@@ -15,8 +15,8 @@ RUN VERSION=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' npm/package.json) \
 
 FROM alpine:3.20
 COPY --from=build /out/terrarium /usr/local/bin/terrarium
-# terrarium keeps its state under LOCALAPPDATA on Windows; give it a home here.
-ENV LOCALAPPDATA=/data
+# terrarium keeps its state under XDG_DATA_HOME on Linux; give it a home here.
+ENV XDG_DATA_HOME=/data
 RUN mkdir -p /data
 # CMD rather than ENTRYPOINT: directories that run the image pass the whole
 # start command themselves, and a fixed entrypoint would prefix it.

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"time"
+
+	"github.com/chryaner/terrarium/internal/paths"
 )
 
 type Golden struct {
@@ -105,18 +107,8 @@ func cloneEnvs(m map[string]*Env) map[string]*Env {
 	return out
 }
 
-// dataDir holds everything terrarium owns on the host: state, downloaded
-// images, generated keys and seeds.
-func dataDir() (string, error) {
-	base := os.Getenv("LOCALAPPDATA")
-	if base == "" {
-		var err error
-		if base, err = os.UserConfigDir(); err != nil {
-			return "", err
-		}
-	}
-	return filepath.Join(base, "terrarium"), nil
-}
+// dataDir holds everything terrarium owns on the host.
+func dataDir() (string, error) { return paths.DataDir() }
 
 func statePath() (string, error) {
 	dir, err := dataDir()

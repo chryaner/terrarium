@@ -3,6 +3,8 @@ package core
 import (
 	"testing"
 	"time"
+
+	"github.com/chryaner/terrarium/internal/paths"
 )
 
 // Whether a golden has usable SSH credentials decides whether fork/start wait
@@ -28,7 +30,7 @@ func TestGoldenHasCreds(t *testing.T) {
 }
 
 func TestStateRoundTrip(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 
 	s, err := LoadState()
 	if err != nil {
@@ -60,7 +62,7 @@ func TestStateRoundTrip(t *testing.T) {
 // file, each adds a different env, and the second to save must not drop the
 // first's addition.
 func TestSaveKeepsConcurrentAddition(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	seed, _ := LoadState()
 	seed.Goldens["g"] = &Golden{VMName: "g", Snapshot: "terrarium-base"}
 	seed.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
@@ -91,7 +93,7 @@ func TestSaveKeepsConcurrentAddition(t *testing.T) {
 // A stale writer's deletion must remove only what it deleted, leaving a
 // concurrent addition in place.
 func TestSaveMergesDeleteAgainstAddition(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	seed, _ := LoadState()
 	seed.Goldens["g"] = &Golden{VMName: "g", Snapshot: "terrarium-base"}
 	seed.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
@@ -124,7 +126,7 @@ func TestSaveMergesDeleteAgainstAddition(t *testing.T) {
 // removed must be gone from the file. The delete is measured against what the
 // last Save wrote, not against what LoadState happened to read.
 func TestSaveDeletesEnvItCreated(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	s, _ := LoadState()
 	s.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
 	if err := s.Save(); err != nil {
@@ -145,7 +147,7 @@ func TestSaveDeletesEnvItCreated(t *testing.T) {
 // The same delete must still leave another process's work alone: an env added
 // between our two saves is ours neither to write nor to remove.
 func TestSaveDeleteSpareConcurrentAddition(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	s, _ := LoadState()
 	s.Envs["a"] = &Env{VMName: "trr-a", Golden: "g", SSHPort: 42200}
 	if err := s.Save(); err != nil {
@@ -175,7 +177,7 @@ func TestSaveDeleteSpareConcurrentAddition(t *testing.T) {
 // An edit to a field must be written, while an env the process never touched
 // keeps whatever the current file holds.
 func TestSaveWritesOwnEditsOnly(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv(paths.BaseEnv, t.TempDir())
 	seed, _ := LoadState()
 	seed.Envs["a"] = &Env{VMName: "trr-a", SSHPort: 42200}
 	if err := seed.Save(); err != nil {
