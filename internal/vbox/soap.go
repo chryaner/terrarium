@@ -99,12 +99,12 @@ func parseSOAP(body []byte) (ret, fault string, err error) {
 	var sawEnvelope, sawFault bool
 	var faultString, faultCode string
 	for {
-		tok, err := d.Token()
-		if err == io.EOF {
+		tok, terr := d.Token()
+		if terr == io.EOF {
 			break
 		}
-		if err != nil {
-			return "", "", err
+		if terr != nil {
+			return "", "", terr
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
