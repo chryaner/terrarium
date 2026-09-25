@@ -38,7 +38,7 @@ func TestRenderSSHConfig(t *testing.T) {
 		"  User terrarium\n",
 		"  IdentityFile C:/Users/dev/AppData/Local/terrarium/goldens/ubuntu-24.04/id_ed25519\n",
 		"  StrictHostKeyChecking no\n",
-		"  UserKnownHostsFile NUL\n",
+		"  UserKnownHostsFile " + os.DevNull + "\n",
 		"  LogLevel ERROR\n",
 		"Host legacy\n",
 		"  Port 42200\n",

@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ func TestArgs(t *testing.T) {
 	want := []string{
 		"-p", "42200",
 		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=NUL",
+		"-o", "UserKnownHostsFile=" + os.DevNull,
 		"-o", "LogLevel=ERROR",
 		"-i", `C:\keys\id_ed25519`,
 		"terrarium@127.0.0.1",

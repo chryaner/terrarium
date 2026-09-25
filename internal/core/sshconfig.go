@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 )
@@ -16,7 +17,12 @@ const (
 )
 
 func sshConfigPath() (string, error) {
-	home := os.Getenv("USERPROFILE")
+	// Windows OpenSSH reads the profile directory USERPROFILE names; elsewhere
+	// the variable means nothing and may be a leftover from WSL.
+	var home string
+	if runtime.GOOS == "windows" {
+		home = os.Getenv("USERPROFILE")
+	}
 	if home == "" {
 		var err error
 		if home, err = os.UserHomeDir(); err != nil {
@@ -64,7 +70,7 @@ func RenderSSHConfig(st *State) string {
 			fmt.Fprint(&b, "  "+passwordAuthNote+"\n")
 		}
 		fmt.Fprintf(&b, "  StrictHostKeyChecking no\n")
-		fmt.Fprintf(&b, "  UserKnownHostsFile NUL\n")
+		fmt.Fprintf(&b, "  UserKnownHostsFile %s\n", os.DevNull)
 		fmt.Fprintf(&b, "  LogLevel ERROR\n")
 	}
 	return b.String()
