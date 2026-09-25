@@ -1,11 +1,12 @@
 # terrarium-mcp
 
 Real, disposable VirtualBox VMs from the CLI or over MCP, for you and your AI
-agent. This package bundles the Windows binary of
+agent. This package bundles the Windows and Linux binaries of
 [terrarium](https://github.com/chryaner/terrarium) so nothing has to be
 installed first.
 
-Requires a Windows host with [VirtualBox](https://www.virtualbox.org/) 7.x.
+Requires an x64 Windows or Linux host with
+[VirtualBox](https://www.virtualbox.org/) 7.x.
 
 Give your agent real machines (Claude Code):
 

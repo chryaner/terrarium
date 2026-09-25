@@ -7,16 +7,20 @@ builds:
     binary: terrarium
     env:
       - CGO_ENABLED=0
-    # The host side is Windows-with-VirtualBox by design; other GOOS binaries
-    # would build fine and then fail doctor on first run.
-    goos: [windows]
+    # The hosts VirtualBox and terrarium both support. macOS would build
+    # but has had no testing, and VirtualBox on Apple silicon runs only ARM
+    # guests.
+    goos: [windows, linux]
     goarch: [amd64]
     ldflags:
       - -s -w
       - -X github.com/chryaner/terrarium/internal/core.Version={{.Version}}
 
 archives:
-  - formats: [zip]
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:
