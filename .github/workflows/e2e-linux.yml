@@ -25,7 +25,7 @@ jobs:
         run: |
           grep -cE 'vmx|svm' /proc/cpuinfo
           uname -r
-          curl -fsSL https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor -o /usr/share/keyrings/vbox.gpg
+          curl -fsSL --retry 3 https://download.virtualbox.org/virtualbox/debian/oracle_vbox_2016.asc | sudo gpg --dearmor -o /usr/share/keyrings/vbox.gpg
           echo "deb [arch=amd64 signed-by=/usr/share/keyrings/vbox.gpg] https://download.virtualbox.org/virtualbox/debian noble contrib" | sudo tee /etc/apt/sources.list.d/vbox.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends "linux-headers-$(uname -r)" build-essential dkms virtualbox-7.2
