@@ -1,6 +1,6 @@
 {
   "name": "terrarium-mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "terrarium: disposable VirtualBox VMs from the CLI or over MCP, for you and your AI agent. Bundles the Windows and Linux binaries.",
   "license": "Apache-2.0",
   "repository": {
