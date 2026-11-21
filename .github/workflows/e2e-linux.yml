@@ -1,0 +1,108 @@
+name: e2e-linux
+
+# Drives real VMs on a Linux host: the hosted Ubuntu runners expose VT-x/AMD-V,
+# so VirtualBox can boot guests there. Slow and network-heavy, so it runs on
+# request rather than on every push.
+on:
+  workflow_dispatch:
+  push:
+    branches: [e2e-linux]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build terrarium
+        run: |
+          go build -o terrarium ./cmd/terrarium
+          sudo install terrarium /usr/local/bin/terrarium
+      - name: Install VirtualBox
+        run: |
+          grep -cE 'vmx|svm' /proc/cpuinfo
+          uname -r
+          curl -fsSL https://www.virtualbox.org/download/oracle_vbox_2016.asc | sudo gpg --dearmor -o /usr/share/keyrings/vbox.gpg
+          echo "deb [arch=amd64 signed-by=/usr/share/keyrings/vbox.gpg] https://download.virtualbox.org/virtualbox/debian noble contrib" | sudo tee /etc/apt/sources.list.d/vbox.list
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends "linux-headers-$(uname -r)" build-essential dkms virtualbox-7.2
+          # KVM and VirtualBox cannot both hold VT-x.
+          sudo modprobe -r kvm_intel kvm_amd kvm 2>/dev/null || true
+          lsmod | grep vboxdrv
+          VBoxManage --version
+      - name: doctor
+        run: terrarium doctor
+      - name: Build a golden
+        run: terrarium get debian-12
+      - name: Env lifecycle
+        run: |
+          set -eux
+          terrarium fork debian-12 e2e
+          terrarium ls
+          terrarium info e2e
+          test "$(terrarium exec e2e -- uname -s)" = Linux
+
+          echo hello > /tmp/in.txt
+          terrarium cp /tmp/in.txt e2e:/tmp/in.txt
+          terrarium cp e2e:/tmp/in.txt /tmp/out.txt
+          cmp /tmp/in.txt /tmp/out.txt
+
+          terrarium exec e2e -- touch /home/terrarium/marker
+          terrarium snapshot e2e marked
+          terrarium revert e2e
+          ! terrarium exec e2e -- test -e /home/terrarium/marker
+          terrarium restore e2e marked
+          terrarium exec e2e -- test -e /home/terrarium/marker
+
+          terrarium down e2e
+          terrarium start e2e
+          terrarium exec e2e -- true
+      - name: Screen, keyboard and mouse
+        run: |
+          set -eux
+          terrarium screenshot e2e /tmp/before.png
+          file /tmp/before.png | grep -q 'PNG image'
+          terrarium type e2e "echo typed" --enter
+          terrarium keys e2e enter
+          terrarium move e2e 100 100
+          terrarium click e2e 100 100
+          terrarium click e2e 120 120 --right
+          terrarium scroll e2e 3
+          # A second call reuses the running web service and its password.
+          terrarium click e2e 100 100 --double
+          pgrep -a vboxwebsrv
+          ss -ltnp | grep 42199
+          terrarium screenshot e2e /tmp/after.png
+      - name: Concurrent commands share the state lock
+        run: |
+          set -eux
+          terrarium fork debian-12 a & terrarium fork debian-12 b & wait
+          terrarium ls
+          terrarium exec a -- true
+          terrarium exec b -- true
+          terrarium rm a & terrarium rm b & wait
+      - name: Data directory is owner-only
+        run: |
+          set -eux
+          d="${XDG_DATA_HOME:-$HOME/.local/share}/terrarium"
+          test "$(stat -c %a "$d")" = 700
+          ls -la "$d"
+      - name: Remove
+        run: |
+          set -eux
+          terrarium rm e2e
+          terrarium rm --golden debian-12
+          test -z "$(VBoxManage list vms)"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: /tmp/*.png
+          if-no-files-found: ignore
+      - if: failure()
+        run: |
+          VBoxManage list vms || true
+          for f in "$HOME"/VirtualBox\ VMs/*/Logs/VBox.log; do echo "== $f"; tail -40 "$f"; done || true
