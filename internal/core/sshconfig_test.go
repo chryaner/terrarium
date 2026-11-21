@@ -198,7 +198,9 @@ func TestWriteSSHConfigMalformedMarkers(t *testing.T) {
 
 func TestUpdateSSHConfigUsesProfile(t *testing.T) {
 	home := t.TempDir()
+	// Windows reads USERPROFILE, every other host HOME.
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("HOME", home)
 
 	if err := UpdateSSHConfig(testState()); err != nil {
 		t.Fatal(err)
