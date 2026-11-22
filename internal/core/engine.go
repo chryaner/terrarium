@@ -2,10 +2,8 @@ package core
 
 import (
 	"fmt"
-	"net"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -187,26 +185,6 @@ func (e *Engine) Adopt(vmName string, o AdoptOpts) (*Golden, error) {
 		g.Shell = probeShell(g.OSType, nil)
 	}
 	return g, e.St.Save()
-}
-
-func (e *Engine) freePort() (int, error) {
-	used := map[int]bool{}
-	for _, env := range e.St.Envs {
-		used[env.SSHPort] = true
-		used[env.RDPPort] = true
-	}
-	for p := portRangeStart; p < portRangeEnd; p++ {
-		if used[p] {
-			continue
-		}
-		l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(p))
-		if err != nil {
-			continue
-		}
-		l.Close()
-		return p, nil
-	}
-	return 0, fmt.Errorf("no free port in %d-%d", portRangeStart, portRangeEnd)
 }
 
 // ForkOpts are per-env overrides. Zero values inherit the golden's hardware
