@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -811,4 +812,56 @@ func parseSnapshotNames(out string) []string {
 		}
 	}
 	return names
+}
+
+// Info is a VM's showvminfo as key/value pairs, for callers that need several
+// settings at once.
+func (c *Client) Info(vm string) (map[string]string, error) {
+	out, err := c.run("showvminfo", vm, "--machinereadable")
+	if err != nil {
+		return nil, err
+	}
+	return parseMachineReadable(out), nil
+}
+
+// ConfigDir is the folder holding a VM's settings file, from showvminfo.
+// VirtualBox doubles the backslashes of a Windows path in that output.
+func ConfigDir(info map[string]string) string {
+	cfg := strings.ReplaceAll(info["CfgFile"], `\`, `\`)
+	if cfg == "" {
+		return ""
+	}
+	return filepath.Dir(cfg)
+}
+
+// SetSerialLog gives a stopped VM a first serial port that writes to a file
+// on the host. Linux cloud images send their console there, so the file is
+// the only record of a boot that never reaches sshd.
+func (c *Client) SetSerialLog(vm, path string) error {
+	_, err := c.run("modifyvm", vm, "--uart1", "0x3F8", "4", "--uartmode1", "file", path)
+	return err
+}
+
+// ActiveNICs lists the adapter numbers a VM has enabled.
+func ActiveNICs(info map[string]string) []int {
+	var nics []int
+	for n := 1; n <= 8; n++ {
+		if v := info["nic"+strconv.Itoa(n)]; v != "" && v != "none" {
+			nics = append(nics, n)
+		}
+	}
+	return nics
+}
+
+// NewMAC gives one adapter of a stopped VM a fresh, VirtualBox-generated MAC
+// address.
+func (c *Client) NewMAC(vm string, nic int) error {
+	_, err := c.run("modifyvm", vm, "--macaddress"+strconv.Itoa(nic), "auto")
+	return err
+}
+
+// Reset is the reset button: the guest restarts without a chance to shut down.
+func (c *Client) Reset(vm string) error {
+	_, err := c.run("controlvm", vm, "reset")
+	return err
 }
