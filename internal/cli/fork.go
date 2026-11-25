@@ -54,7 +54,7 @@ var forkCmd = &cobra.Command{
 }
 
 func init() {
-	forkCmd.Flags().DurationVar(&forkTTL, "ttl", 0, "auto-remove after this long (e.g. 90m, 2h); `terrarium gc` collects it")
+	forkCmd.Flags().DurationVar(&forkTTL, "ttl", 0, "auto-remove after this long (e.g. 90m, 2h); `terrarium gc` collects it. Without it the env stays until `terrarium rm`")
 	forkCmd.Flags().StringVar(&forkShare, "share", "", "host directory to share into the guest at "+core.GuestSharePath)
 	rootCmd.AddCommand(forkCmd)
 }
