@@ -216,3 +216,56 @@ func TestCopyCreatesParentsWithFlag(t *testing.T) {
 		t.Errorf("pulled with -p = %q", got)
 	}
 }
+
+func TestPushStream(t *testing.T) {
+	c := testClient(t)
+	guest := t.TempDir()
+	// Not text: a stream is copied byte for byte, line endings and all.
+	payload := "\x00\x01binary\r\n\xff" + strings.Repeat("z", 100_000)
+
+	dst := filepath.Join(guest, "blob.bin")
+	if err := pushStream(c, strings.NewReader(payload), guestPath(dst), false); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, dst); got != payload {
+		t.Errorf("stream arrived altered: %d bytes, want %d", len(got), len(payload))
+	}
+
+	if err := pushStream(c, strings.NewReader("x"), guestPath(guest), false); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("a stream into a directory has no file name to use, got %v", err)
+	}
+
+	deep := filepath.Join(guest, "a", "b", "blob.bin")
+	if err := pushStream(c, strings.NewReader("x"), guestPath(deep), false); err == nil || !strings.Contains(err.Error(), "pass -p") {
+		t.Errorf("a missing parent needs -p, got %v", err)
+	}
+	if err := pushStream(c, strings.NewReader("x"), guestPath(deep), true); err != nil {
+		t.Fatal(err)
+	}
+	if got := read(t, deep); got != "x" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPullStream(t *testing.T) {
+	c := testClient(t)
+	guest := t.TempDir()
+	payload := "\x00line\r\n\xfe" + strings.Repeat("q", 100_000)
+	src := filepath.Join(guest, "blob.bin")
+	write(t, src, payload)
+
+	var out strings.Builder
+	if err := pullStream(c, guestPath(src), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != payload {
+		t.Errorf("stream arrived altered: %d bytes, want %d", out.Len(), len(payload))
+	}
+
+	if err := pullStream(c, guestPath(guest), io.Discard); err == nil || !strings.Contains(err.Error(), "is a directory") {
+		t.Errorf("a directory cannot go to a stream, got %v", err)
+	}
+	if err := pullStream(c, guestPath(filepath.Join(guest, "absent")), io.Discard); err == nil {
+		t.Error("a missing file must be an error")
+	}
+}

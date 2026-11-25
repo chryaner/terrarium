@@ -254,3 +254,50 @@ func localIsDir(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
 }
+
+// PushStream writes everything r yields to one file in the guest. It is what
+// lets a file arrive from a third machine in one hop, piped through ssh into
+// `terrarium cp - env:path`, instead of landing on the host's disk first.
+func PushStream(port int, user, password, keyPath string, r io.Reader, remote string, parents bool) error {
+	return withSFTP(port, user, password, keyPath, func(c *sftp.Client) error {
+		return pushStream(c, r, remote, parents)
+	})
+}
+
+// PullStream writes one guest file to w.
+func PullStream(port int, user, password, keyPath, remote string, w io.Writer) error {
+	return withSFTP(port, user, password, keyPath, func(c *sftp.Client) error {
+		return pullStream(c, remote, w)
+	})
+}
+
+func pushStream(c *sftp.Client, r io.Reader, remote string, parents bool) error {
+	if remoteIsDir(c, remote) {
+		return fmt.Errorf("%s is a directory in the guest: a stream has no name of its own, so name the file to write", remote)
+	}
+	if err := ensureRemoteParent(c, remote, parents); err != nil {
+		return err
+	}
+	dst, err := c.Create(remote)
+	if err != nil {
+		return fmt.Errorf("creating %s in the guest: %w", remote, err)
+	}
+	if _, err := io.Copy(dst, r); err != nil {
+		dst.Close()
+		return err
+	}
+	return dst.Close()
+}
+
+func pullStream(c *sftp.Client, remote string, w io.Writer) error {
+	if remoteIsDir(c, remote) {
+		return fmt.Errorf("%s is a directory in the guest: only a single file can be written to a stream", remote)
+	}
+	src, err := c.Open(remote)
+	if err != nil {
+		return fmt.Errorf("opening %s in the guest: %w", remote, err)
+	}
+	defer src.Close()
+	_, err = io.Copy(w, src)
+	return err
+}

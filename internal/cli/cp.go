@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/chryaner/terrarium/internal/core"
 	"github.com/spf13/cobra"
@@ -30,17 +31,26 @@ Guest paths always use forward slashes, Windows guests included:
   terrarium cp setup.exe win1:C:/Users/terrarium/setup.exe
 
 A destination that is an existing directory receives the source under its own
-name. The destination's parent directory must exist; -p creates it.`,
+name. The destination's parent directory must exist; -p creates it.
+
+A host side of - is standard input or output, one file at a time. That is how
+a file gets from another machine into an env in one hop, with terrarium run
+over ssh:
+
+  ssh bigpc terrarium cp - t1:/tmp/images.tar < images.tar
+  ssh bigpc terrarium cp t1:/var/log/syslog - > syslog
+  tar c ./src | terrarium cp - t1:/tmp/src.tar   # a directory: pack it first`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		e, err := core.NewEngine()
 		if err != nil {
 			return err
 		}
-		if err := e.Copy(args[0], args[1], cpRecursive, cpParents); err != nil {
+		if err := e.Copy(args[0], args[1], cpRecursive, cpParents, os.Stdin, os.Stdout); err != nil {
 			return err
 		}
-		fmt.Printf("%s -> %s\n", args[0], args[1])
+		// Not on stdout: with a destination of - that is where the file went.
+		fmt.Fprintf(os.Stderr, "%s -> %s\n", args[0], args[1])
 		return nil
 	},
 }
