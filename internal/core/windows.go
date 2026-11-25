@@ -46,6 +46,9 @@ func windowsPostInstall(pubKey, user, password string) string {
 		`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
 		`Set-Service -Name sshd -StartupType Automatic; ` +
 		`Start-Service sshd; ` +
+		// Windows expires a local password after 42 days and then refuses the
+		// account, key or not. A golden sits on a shelf far longer than that.
+		`net accounts /maxpwage:unlimited; ` +
 		`New-NetFirewallRule -Name sshd -DisplayName 'OpenSSH Server' -Enabled True ` +
 		`-Direction Inbound -Protocol TCP -Action Allow -LocalPort 22 -ErrorAction SilentlyContinue; ` +
 		`$k = 'HKLM:\SOFTWARE\OpenSSH'; ` +
