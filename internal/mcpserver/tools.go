@@ -282,6 +282,8 @@ type envForkInput struct {
 	MemoryMB      int    `json:"memory_mb,omitempty" jsonschema:"memory in MB, default inherits the golden image"`
 	ShareHostPath string `json:"share_host_path,omitempty" jsonschema:"absolute host directory to mount at /work inside the guest, read-write"`
 	TTLSeconds    int    `json:"ttl_seconds,omitempty" jsonschema:"auto-remove the env this many seconds from now; env_gc collects it. Omit for no expiry"`
+	Hostname      string `json:"hostname,omitempty" jsonschema:"host name to give the guest; default keeps the golden image's, so every env of one golden has the same name"`
+	NewMAC        bool   `json:"new_mac,omitempty" jsonschema:"give the env its own network card addresses instead of the golden image's. Breaks networking in guests whose network settings name the card by address"`
 }
 
 type envOutput struct {
@@ -294,7 +296,10 @@ func envFork(ctx context.Context, _ *mcp.CallToolRequest, in envForkInput) (*mcp
 	if err != nil {
 		return nil, envOutput{}, err
 	}
-	opts := core.ForkOpts{CPUs: in.CPUs, MemMB: in.MemoryMB, ShareHostPath: in.ShareHostPath}
+	opts := core.ForkOpts{
+		CPUs: in.CPUs, MemMB: in.MemoryMB, ShareHostPath: in.ShareHostPath,
+		Hostname: in.Hostname, NewMAC: in.NewMAC,
+	}
 	if in.TTLSeconds > 0 {
 		opts.TTL = time.Duration(in.TTLSeconds) * time.Second
 	}

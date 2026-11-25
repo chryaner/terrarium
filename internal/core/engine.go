@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chryaner/terrarium/internal/sshx"
 	"github.com/chryaner/terrarium/internal/vbox"
 )
 
@@ -195,6 +194,12 @@ type ForkOpts struct {
 	ShareHostPath string
 	// TTL, if set, marks the env for `terrarium gc` to remove once it elapses.
 	TTL time.Duration
+	// NewMAC gives the env's network adapters fresh MAC addresses instead of
+	// the golden's. Off by default: see CloneLinked.
+	NewMAC bool
+	// Hostname, if set, is the name the guest is given before its clean
+	// snapshot, so the env does not answer to the golden's.
+	Hostname string
 }
 
 // Fork creates a disposable env from a golden: linked clone, NAT port
@@ -211,7 +216,10 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 		return nil, fmt.Errorf("invalid env name %q (letters, digits, dashes)", name)
 	}
 	if e.St.Envs[name] != nil {
-		return nil, fmt.Errorf("env %q already exists", name)
+		return nil, fmt.Errorf("env %q already exists: `terrarium rm %s` removes it", name, name)
+	}
+	if err := checkForkHostname(opts.Hostname, g); err != nil {
+		return nil, err
 	}
 	vmName := VMPrefix + name
 
@@ -250,8 +258,15 @@ func (e *Engine) Fork(golden, name string, opts ForkOpts, progress func(string))
 	if err := e.St.Save(); err != nil {
 		return nil, e.rollbackFork(name, vmName, err, progress)
 	}
-	if err := e.prepareFork(g, env, opts, progress); err != nil {
-		return nil, e.rollbackFork(name, vmName, err, progress)
+	if err := e.prepareFork(g, name, env, opts, progress); err != nil {
+		// Read off the machine before the rollback destroys it: what the guest
+		// last printed is the only clue to a boot that never reached sshd.
+		evidence := e.bootEvidence(name, env)
+		err = e.rollbackFork(name, vmName, err, progress)
+		if evidence != "" {
+			err = fmt.Errorf("%w\n%s", err, evidence)
+		}
+		return nil, err
 	}
 	return env, nil
 }
@@ -303,13 +318,13 @@ func (e *Engine) stopForUnregister(vmName string) (gone bool, problems []error) 
 // prepareFork configures and boots a clone that is already registered and
 // recorded. Every error it returns is rolled back by Fork, so it cleans up
 // nothing itself.
-func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(string)) error {
+func (e *Engine) prepareFork(g *Golden, name string, env *Env, opts ForkOpts, progress func(string)) error {
 	vmName := env.VMName
-	state, err := e.VB.VMState(vmName)
+	info, err := e.VB.Info(vmName)
 	if err != nil {
 		return err
 	}
-	if needsDiscard(state) {
+	if needsDiscard(info["VMState"]) {
 		// Costs a cold boot instead of resuming the golden's RAM: the only way
 		// to get a mutable machine out of an online snapshot.
 		progress("clone came up saved (online snapshot): discarding saved state, it will cold boot")
@@ -322,6 +337,20 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 	}
 	if err := e.VB.ModifyCPUMem(vmName, opts.CPUs, opts.MemMB); err != nil {
 		return err
+	}
+	// A clone inherits the golden's serial port, file path included, so every
+	// fork would write its console into the same file.
+	if path := serialLogFor(info, env.OSType); path != "" {
+		if err := e.VB.SetSerialLog(vmName, path); err != nil {
+			return err
+		}
+	}
+	if opts.NewMAC {
+		for _, nic := range vbox.ActiveNICs(info) {
+			if err := e.VB.NewMAC(vmName, nic); err != nil {
+				return err
+			}
+		}
 	}
 	// Forks inherit the golden's pointing hardware, PS/2-only on most images.
 	// Absolute mouse injection (click) needs a USB tablet, and it has to land
@@ -344,7 +373,7 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 			return err
 		}
 	} else if g.hasCreds() {
-		if err := sshx.WaitReady(env.SSHPort, bootTimeout); err != nil {
+		if err := e.waitSSH(vmName, env.SSHPort, bootTimeout, progress); err != nil {
 			return err
 		}
 	} else {
@@ -352,6 +381,12 @@ func (e *Engine) prepareFork(g *Golden, env *Env, opts ForkOpts, progress func(s
 		// Nothing to wait for, but snapshotting the instant the VM starts
 		// would leave the revert target at the BIOS. Give it some boot.
 		time.Sleep(settleTime)
+	}
+	if opts.Hostname != "" {
+		progress("naming the guest " + opts.Hostname)
+		if err := e.setHostname(name, env, g, opts.Hostname, progress); err != nil {
+			return err
+		}
 	}
 	progress("snapshotting clean state (revert target)")
 	return e.VB.TakeSnapshot(vmName, cleanSnapshot)
@@ -449,7 +484,7 @@ func (e *Engine) waitReady(env *Env, progress func(string)) error {
 		progress(credlessNote)
 		return nil
 	}
-	return sshx.WaitReady(env.SSHPort, bootTimeout)
+	return e.waitSSH(env.VMName, env.SSHPort, bootTimeout, progress)
 }
 
 // Down shuts an env down without touching state, so `up` can start it again.

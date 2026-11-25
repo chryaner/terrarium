@@ -302,11 +302,21 @@ func (e *Engine) buildGolden(image, vmName, keyPath, isoPath string, progress fu
 		return nil, err
 	}
 
+	// The golden gets the serial console its forks will inherit: a cloud
+	// image writes its boot there, and that is what a failed boot is read from.
+	if info, err := e.VB.Info(vmName); err == nil {
+		if path := serialLogFor(info, ""); path != "" {
+			if err := e.VB.SetSerialLog(vmName, path); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	progress("first boot: cloud-init applies the seed")
 	if err := e.VB.StartHeadless(vmName); err != nil {
 		return nil, err
 	}
-	if err := sshx.WaitReady(port, firstBootTimeout); err != nil {
+	if err := e.waitSSH(vmName, port, firstBootTimeout, progress); err != nil {
 		return nil, err
 	}
 
