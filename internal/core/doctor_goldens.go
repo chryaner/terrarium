@@ -4,9 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/chryaner/terrarium/internal/sshx"
 )
 
 // probeTTL marks a probe env for `terrarium gc`, in case the check dies
@@ -70,6 +73,10 @@ func (e *Engine) checkGolden(name string) Check {
 		}
 		err = e.runQuiet(env, probeTimeout, noop)
 	}
+	corrected := ""
+	if err == nil {
+		corrected = e.correctShell(env, g)
+	}
 	if rmErr := e.Remove(env); rmErr != nil && err == nil {
 		c.Detail = fmt.Sprintf("forked and ran a command, but the probe env %s could not be removed: %v", env, rmErr)
 		c.Fix = "`terrarium rm " + env + "`"
@@ -84,8 +91,37 @@ func (e *Engine) checkGolden(name string) Check {
 		return c
 	}
 	c.OK = true
-	c.Detail = fmt.Sprintf("forks and runs a command (%.0fs)", time.Since(start).Seconds())
+	c.Detail = fmt.Sprintf("forks and runs a command (%.0fs)", time.Since(start).Seconds()) + corrected
 	return c
+}
+
+// correctShell asks a Windows guest reached over SSH which shell its sessions
+// land in, and fixes the golden's record if it says otherwise. The record is
+// what exec quotes for, and a golden built while the post-install raced the
+// shutdown is recorded as PowerShell while its sessions are cmd.exe. It
+// returns a note for the check's detail, empty when nothing changed.
+func (e *Engine) correctShell(envName string, g *Golden) string {
+	if transportOf(g) != TransportSSH || !isWindowsGuest(g.OSType) || g.Shell == "" {
+		return ""
+	}
+	port, user, password, key, err := e.SSHTarget(envName)
+	if err != nil {
+		return ""
+	}
+	var out sshx.OutputBuffer
+	if _, err := sshx.ExecStreams(port, user, password, key, shellProbe, &out, io.Discard); err != nil {
+		return ""
+	}
+	actual := classifyShellProbe(out.String())
+	if actual == "" || actual == g.Shell {
+		return ""
+	}
+	recorded := g.Shell
+	g.Shell = actual
+	if err := e.St.Save(); err != nil {
+		return ""
+	}
+	return fmt.Sprintf("; its sessions land in %s, not %s as recorded: record corrected", actual, recorded)
 }
 
 // goldenFix is what to do about a golden that failed its check. A Windows

@@ -396,6 +396,12 @@ show <env>`), run `net accounts /maxpwage:unlimited` in the guest, then
 `terrarium promote <env> <image>` and `terrarium adopt` it with the new
 password. `terrarium doctor --goldens` finds the ones affected.
 
+A Windows 10 or 11 golden built before this version may also have missed the
+end of its setup: its SSH sessions land in cmd.exe and it logs in by password,
+not by key. `doctor --goldens` notices the shell and corrects the record, so
+`exec` quotes for the shell that is really there; `terrarium get <image>
+--force` rebuilds the golden properly.
+
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
 and its recipe needs a product key you supply in a local override. Recipe
