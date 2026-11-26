@@ -76,7 +76,10 @@ func (e *Engine) checkGolden(name string) Check {
 		return c
 	}
 	if err != nil {
-		c.Detail = "forked, but no command runs in it: " + err.Error()
+		// The first line only: the rest of a refused login is a pointer back
+		// to this very check.
+		reason, _, _ := strings.Cut(err.Error(), "\n")
+		c.Detail = "forked, but no command runs in it: " + reason
 		c.Fix = goldenFix(name, g)
 		return c
 	}
