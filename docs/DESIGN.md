@@ -286,6 +286,66 @@ All VBoxManage specifics stay behind `internal/vbox`. The rest of the code
 speaks abstract verbs (`Fork`, `Exec`, `WaitReady`), so a future QEMU or
 Hyper-V driver slots in without touching anything above it.
 
+## Booting a fork: identity, the console log and a boot that hangs
+
+**An env is the golden's twin unless asked otherwise.** A linked clone keeps
+the golden's MAC addresses (`keepallmacs`) and, being the same disk, its host
+name. Both are deliberate defaults: each env sits behind its own NAT, where a
+shared address collides with nothing, and images whose network configuration
+names the card by its MAC - netplan on Ubuntu cloud images does - come up with
+no network when the address changes. Where envs do meet, on a server that
+keys its agents by host name or MAC, `fork --hostname` and `--new-mac` give one
+its own. The host name is set inside the guest before the clean snapshot, so
+`revert` keeps it: `hostnamectl` and `/etc/hosts` on Linux, `Rename-Computer`
+and a restart on Windows. It needs a golden terrarium can run a command in.
+
+A new MAC cannot simply be set before the first boot, for the reason the
+default exists. For a Linux guest terrarium can log in to, the fork boots on
+the golden's address, deletes the address from the guest's network settings -
+netplan, NetworkManager keyfiles, ifcfg files, the persistent-net udev rule -
+switches off cloud-init's network module so it does not write them back, shuts
+down, changes the hardware and boots again. Tested on Ubuntu 24.04, Debian 12
+and 13, Alma 9, Rocky 9, Fedora 44 and openSUSE 16.0. Windows takes a new
+address in its stride, so there it changes before the first boot, as it does
+for a guest terrarium has no login for.
+
+**Every Linux env logs its console to a file.** A clone also inherits the
+golden's serial port, file path included, so forks of a golden that had one
+all wrote into the same log. `fork` points the first serial port at
+`serial.log` in the env's own VM folder, and switches the port on for
+non-Windows guests that had none: cloud images send their console to the
+first serial port, and without one that output went nowhere. `get` does the
+same for the golden's first boot. A port wired to a pipe, a socket or a host
+device is left as it is - someone set that up on purpose.
+
+**A boot that hangs is reset.** Linux guests sometimes stop in the first three
+seconds of the kernel's boot - in the initramfs, right after the disks are
+found - and never recover, while the same machine boots normally when
+restarted. It was reproduced at will on a Windows host with Hyper-V active,
+where VirtualBox runs guests through Windows' hypervisor rather than on the
+CPU: 16 of 32 boots of a two-CPU Ubuntu 24.04 guest hung, none of 14 with
+one CPU, and neither the USB tablet nor the paravirtualization interface
+(default, none, hyperv) made a difference. So the readiness wait watches the
+console log, and a guest whose console has been silent for 30 seconds with
+sshd still not answering gets the reset button and the full timeout again.
+At every second boot hanging, the resets have to be many for a fork to be
+dependable: up to six, which leaves under one failure in a hundred, and a
+seventh hang ends the wait at once rather than sitting out the timeout. A
+golden's first boot gets up to four resets, each after 90 seconds, because
+cloud-init has quiet stretches of its own.
+
+Two cases are told apart from that hang. A console that ends at a login
+prompt belongs to a guest that finished booting and has no sshd to offer, so
+it is waited for rather than put through the same boot again. A guest with no
+console log gives nothing to judge by and is simply waited for. `doctor` warns
+when Windows' hypervisor is active, since it is also why such a host is slower
+and has no nested virtualization.
+
+**A fork that still fails leaves evidence.** The rollback deletes the machine,
+which used to delete the only clue with it. The error now quotes the last
+lines of the console, and that log and a screenshot are kept under `failed/`
+in the data directory, one pair per env name.
+
 ## Reaching a guest: transports, files and the exec runtime
 
 Everything above assumes SSH, and SSH is still the default: it needs nothing

@@ -29,7 +29,7 @@ defaults:
 jobs:
   e2e:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -168,6 +168,140 @@ jobs:
           wait "$pa"
           wait "$pb"
           test "$(terrarium ls | grep -c 'env:')" = 1
+      - name: Listing
+        run: |
+          # list is ls; the filters keep only what terrarium manages.
+          test "$(terrarium list --envs --json | jq -r '.[].role')" = env:e2e
+          test "$(terrarium ls --goldens --json | jq -r '.[].role')" = golden:debian-12
+          test "$(terrarium ls --goldens --envs --json | jq length)" = 2
+          test "$(terrarium ls --envs --json | jq -r '.[0].arch')" = x64
+          terrarium ls | head -1 | grep -q ARCH
+      - name: An env with its own identity
+        timeout-minutes: 10
+        run: |
+          vms="$(VBoxManage list systemproperties | sed -n 's/^Default machine folder: *//p')"
+
+          # Refused before anything is cloned.
+          if terrarium fork debian-12 bad --hostname 'a;b'; then exit 1; fi
+          if terrarium ls --envs | grep -q env:bad; then exit 1; fi
+
+          terrarium fork debian-12 own --hostname own-box --new-mac --cpus 1 --memory 1024
+          test "$(terrarium exec own -- hostname)" = own-box
+          test "$(terrarium exec own -- cat /etc/hostname)" = own-box
+          terrarium exec own -- sudo -n true
+          test "$(terrarium exec own -- nproc)" = 1
+          test "$(terrarium info own --json | jq .memory_mb)" = 1024
+
+          mac() { VBoxManage showvminfo "$1" --machinereadable | sed -n 's/^macaddress1="\(.*\)"/\1/p'; }
+          test -n "$(mac trr-own)"
+          test "$(mac trr-own)" != "$(mac trr-golden-debian-12)"
+          # Without the flags an env is the golden's twin.
+          test "$(mac trr-e2e)" = "$(mac trr-golden-debian-12)"
+          test "$(terrarium exec e2e -- hostname)" != own-box
+
+          # The name survives a revert and a cold boot.
+          terrarium revert own
+          test "$(terrarium exec own -- hostname)" = own-box
+          terrarium down own
+          terrarium start own
+          test "$(terrarium exec own -- hostname)" = own-box
+
+          # Each machine logs its console to a file in its own folder.
+          test -s "$vms/trr-own/serial.log"
+          test -s "$vms/trr-e2e/serial.log"
+          grep -q 'Linux version' "$vms/trr-own/serial.log"
+          VBoxManage showvminfo trr-own --machinereadable | grep -F "uartmode1=\"file,$vms/trr-own/serial.log\""
+
+          # A name in use says how to free it.
+          if terrarium fork debian-12 own 2> /tmp/dup.txt; then exit 1; fi
+          grep -q 'terrarium rm own' /tmp/dup.txt
+          terrarium rm own
+      - name: Copy through a pipe
+        run: |
+          head -c 5000000 /dev/urandom > /tmp/blob
+          terrarium cp - e2e:/tmp/blob < /tmp/blob
+          test "$(terrarium exec e2e -- stat -c %s /tmp/blob)" = 5000000
+          terrarium cp e2e:/tmp/blob - > /tmp/blob.back
+          cmp /tmp/blob /tmp/blob.back
+
+          # The way a directory travels: packed on one side, unpacked on the other.
+          mkdir -p /tmp/tree/sub && echo one > /tmp/tree/sub/f
+          tar -C /tmp -c tree | terrarium cp - e2e:/tmp/tree.tar
+          test "$(terrarium exec e2e -- sh -c 'tar -C /tmp -xf /tmp/tree.tar && cat /tmp/tree/sub/f')" = one
+
+          if terrarium cp -r - e2e:/tmp/x < /tmp/blob; then exit 1; fi
+          if terrarium cp - e2e:/tmp < /tmp/blob; then exit 1; fi
+          if terrarium cp - e2e:/no/such/dir/blob < /tmp/blob; then exit 1; fi
+          terrarium cp -p - e2e:/tmp/made/for/it/blob < /tmp/blob
+          test "$(terrarium exec e2e -- stat -c %s /tmp/made/for/it/blob)" = 5000000
+      - name: doctor --goldens
+        timeout-minutes: 10
+        run: |
+          terrarium doctor --goldens debian-12 | tee /tmp/doctor.txt
+          grep -q '^ok    golden debian-12: forks and runs a command' /tmp/doctor.txt
+          # The probe env is gone again.
+          if terrarium ls --envs | grep -q doctor-; then exit 1; fi
+
+          if terrarium doctor --goldens no-such-golden > /tmp/doctor.txt; then exit 1; fi
+          grep -q '^FAIL  golden no-such-golden' /tmp/doctor.txt
+          # A name without the flag is a mistake, not a silent host-only check.
+          if terrarium doctor debian-12; then exit 1; fi
+      - name: A fork that cannot boot to sshd
+        timeout-minutes: 20
+        run: |
+          d="${XDG_DATA_HOME:-$HOME/.local/share}/terrarium"
+
+          # A golden whose guest boots and never offers ssh.
+          terrarium fork debian-12 mute
+          terrarium exec mute -- sudo systemctl mask ssh.service ssh.socket
+          terrarium promote mute nossh
+          terrarium rm mute
+
+          if terrarium fork nossh dead > /tmp/dead.txt 2>&1; then cat /tmp/dead.txt; exit 1; fi
+          cat /tmp/dead.txt
+          # It booted to a login prompt, so it is waited for, not reset.
+          if grep -q 'resetting the machine' /tmp/dead.txt; then exit 1; fi
+          grep -q 'no SSH banner' /tmp/dead.txt
+          grep -q 'rolled back, nothing left behind' /tmp/dead.txt
+          # The error quotes the guest, and the evidence outlives the machine.
+          grep -q 'the guest console ended with:' /tmp/dead.txt
+          grep -q 'login:' /tmp/dead.txt
+          test -s "$d/failed/dead.serial.log"
+          file "$d/failed/dead.png" | grep -q 'PNG image'
+
+          # Nothing is left to block the next attempt under the same name.
+          if terrarium ls --envs | grep -q env:dead; then exit 1; fi
+          if VBoxManage list vms | grep -q trr-dead; then exit 1; fi
+          terrarium fork debian-12 dead
+          terrarium rm dead
+      - name: A fork that hangs at boot
+        timeout-minutes: 20
+        run: |
+          d="${XDG_DATA_HOME:-$HOME/.local/share}/terrarium"
+
+          # A golden whose guest stops in the initramfs on every boot, the
+          # way a guest sometimes does on its own.
+          terrarium fork debian-12 stuck
+          terrarium exec stuck --stdin <<'EOF'
+          echo 'GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX break=top"' | sudo tee /etc/default/grub.d/99-break.cfg
+          sudo update-grub
+          EOF
+          terrarium promote stuck hangs
+          terrarium rm stuck
+
+          if terrarium fork hangs hung > /tmp/hung.txt 2>&1; then cat /tmp/hung.txt; exit 1; fi
+          cat /tmp/hung.txt
+          # The silent console is noticed and the machine reset, as often as allowed,
+          # and then it gives up without sitting out the whole timeout again.
+          grep -q 'resetting the machine (1 of 6)' /tmp/hung.txt
+          grep -q 'resetting the machine (6 of 6)' /tmp/hung.txt
+          grep -q 'hung while booting 7 times in a row' /tmp/hung.txt
+          grep -q 'rolled back, nothing left behind' /tmp/hung.txt
+          grep -q 'the guest console ended with:' /tmp/hung.txt
+          test -s "$d/failed/hung.serial.log"
+          if terrarium ls --envs | grep -q env:hung; then exit 1; fi
+          terrarium rm --golden hangs
+          terrarium rm --golden nossh
       - name: Data directory is owner-only
         run: |
           d="${XDG_DATA_HOME:-$HOME/.local/share}/terrarium"

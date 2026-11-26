@@ -182,11 +182,22 @@ back, `revert` resets it.
 
 ### Everyday commands
 
-`terrarium ls` lists the machines with their guest type, and `terrarium info
-<name>` reports one in full - architecture, hardware, snapshot, credentials.
+`terrarium ls` lists the machines with their guest type and architecture
+(`--goldens` or `--envs` for one kind), and `terrarium info <name>` reports
+one in full - hardware, snapshot, credentials.
 `terrarium cp ./app.tar t1:/tmp/` moves files in or out over the env's own
 SSH. `terrarium create s11 --iso suse.iso --ostype OpenSUSE_64` installs an
 OS by hand from an ISO, see [Images](#images).
+
+- `fork <golden> <env> --hostname <name> --new-mac` gives the env its own
+  host name and network card address. By default it keeps the golden's, which
+  only matters once envs meet on a shared service. `--cpus` and `--memory`
+  size it, and without `--ttl` it stays until `terrarium rm`.
+- `cp - <env>:<path>` reads the file from standard input, and `cp <env>:<path>
+  -` writes it to standard output, so a file crosses from a third machine in
+  one hop: `ssh host terrarium cp - t1:/tmp/app.tar < app.tar`.
+- `doctor --goldens` forks every golden, runs a command in it and removes it:
+  the way to find a golden that went bad while switched off.
 
 - `exec <env> --shell powershell|cmd|sh -- <command...>` runs the command
   under that shell instead of the one the guest's sshd would pick.
@@ -376,6 +387,14 @@ one, so `ssh` and `scp` from the generated `~/.ssh/config` entry never prompt.
 Its SSH sessions land in PowerShell, so `exec` quotes for PowerShell rather
 than cmd.exe. A golden built by an older terrarium keeps its password and its
 cmd shell; re-run `terrarium get win10 --force` to rebuild it.
+
+Windows expires a local password after 42 days and then refuses the account,
+key or not: `exec` fails with a refused login on a golden that worked last
+month. Goldens built from this version on have the expiry turned off. For an
+older or adopted one, fork it, set the password on the console (`terrarium
+show <env>`), run `net accounts /maxpwage:unlimited` in the guest, then
+`terrarium promote <env> <image>` and `terrarium adopt` it with the new
+password. `terrarium doctor --goldens` finds the ones affected.
 
 `win10` and `winxp` ship today. XP predates OpenSSH, so its
 forks are driven through screenshot, click, type and keys rather than `exec`,
