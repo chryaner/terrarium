@@ -73,7 +73,9 @@ func newServer() *mcp.Server {
 		Description: "Check that this machine can run terrarium at all: VirtualBox present and responding, " +
 			"state directory writable, SSH client available. Call this once before anything else. " +
 			"Cheap and safe to call at any time. If it reports ok:false, report the failing check and " +
-			"its fix to the user rather than working around it.",
+			"its fix to the user rather than working around it. With goldens it also proves those golden " +
+			"images still fork and take a command, which is slow and changes that advice: a golden that " +
+			"fails is one image to repair or avoid, not a reason to stop.",
 	}, doctorCheck)
 
 	mcp.AddTool(s, &mcp.Tool{

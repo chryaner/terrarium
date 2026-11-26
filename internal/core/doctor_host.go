@@ -1,18 +1,87 @@
 package core
 
 import (
+	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 )
 
 // hostChecks covers what VBoxManage answering does not prove: on Linux it runs
 // fine with no kernel driver loaded, and only VM start fails.
 func hostChecks() []Check {
-	if runtime.GOOS != "linux" {
+	switch runtime.GOOS {
+	case "linux":
+		return append(cpuVirtChecks("/proc/cpuinfo"), linuxKernelChecks("/sys/module")...)
+	case "windows":
+		return hypervisorChecks(windowsHypervisorPresent())
+	}
+	return nil
+}
+
+// cpuVirtChecks reads the CPU flags for VT-x or AMD-V. VirtualBox 7 has no
+// way to run a guest without them, and says so only when the first VM starts
+// (VERR_VMX_NO_VMX). A cpuinfo that cannot be read, or has no flags line at
+// all, proves nothing either way and is not reported.
+func cpuVirtChecks(cpuinfo string) []Check {
+	data, err := os.ReadFile(cpuinfo)
+	if err != nil {
 		return nil
 	}
-	return linuxKernelChecks("/sys/module")
+	sawFlags := false
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if !ok || strings.TrimSpace(key) != "flags" {
+			continue
+		}
+		sawFlags = true
+		for _, flag := range strings.Fields(value) {
+			if flag == "vmx" || flag == "svm" {
+				return []Check{{Name: "hardware virtualization", OK: true, Detail: flag}}
+			}
+		}
+	}
+	if !sawFlags {
+		return nil
+	}
+	return []Check{{
+		Name:   "hardware virtualization",
+		Detail: "the CPU reports neither vmx nor svm, so no VM can start",
+		Fix:    "turn on VT-x or AMD-V in the firmware setup; if this machine is itself a VM, turn on nested virtualization for it in the hypervisor that runs it",
+	}}
+}
+
+// windowsHypervisorPresent asks Windows whether its own hypervisor is
+// running, which Hyper-V, WSL2, Docker Desktop and virtualization-based
+// security all switch on. Unknown counts as no: the answer only adds a
+// warning.
+func windowsHypervisorPresent() bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "powershell", "-NoProfile", "-NonInteractive", "-Command",
+		"(Get-CimInstance Win32_ComputerSystem).HypervisorPresent").Output()
+	return err == nil && strings.EqualFold(strings.TrimSpace(string(out)), "true")
+}
+
+// hypervisorChecks warns that VirtualBox is not the only hypervisor. With
+// Windows' own one running, VirtualBox has to run guests through it instead
+// of on the CPU directly. Everything still works, which is why this is a
+// warning, but it explains what users otherwise meet as unrelated mysteries.
+func hypervisorChecks(present bool) []Check {
+	if !present {
+		return nil
+	}
+	return []Check{{
+		Name:     "Windows hypervisor",
+		Optional: true,
+		Detail: "Hyper-V is active, so VirtualBox runs guests through it: slower, no nested virtualization, " +
+			"and a Linux guest with more than one CPU sometimes hangs in the first seconds of its boot (terrarium resets it and carries on)",
+		Fix: "nothing has to be done. For full speed, `bcdedit /set hypervisorlaunchtype off` and a restart turn it off, " +
+			"along with everything that needs it: WSL2, Docker Desktop, Windows Sandbox",
+	}}
 }
 
 // linuxKernelChecks reads loaded modules from a /sys/module layout; tests
