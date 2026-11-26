@@ -50,6 +50,20 @@ nothing in it is quoted, escaped or split on the way.
 
   terrarium exec t1 --stdin < setup.ps1
 
+It is also the answer when terrarium itself runs on another machine. Over ssh
+the command line is parsed once more, by that machine's shell, before
+terrarium sees it, and that parse eats quotes and splits arguments:
+
+  ssh bigpc terrarium exec t1 -- stat -c '%s %n' /etc/hosts   # arrives as stat -c %s %n ...
+  ssh bigpc terrarium exec t1 --stdin <<'EOF'                  # arrives as written
+  stat -c '%s %n' /etc/hosts
+  EOF
+
+On the guestcontrol transport a Windows command runs with the account's
+ordinary rights even when the account is an administrator, so an installer
+that needs elevation fails there (msiexec exits 1603). SSH sessions on Windows
+are elevated; a golden with an SSH server is the way to run such installers.
+
 A timeout on its own only stops waiting: the SSH session cannot be cancelled
 from here, so the command keeps running in the guest, invisibly. On Windows it
 runs in session 0, where anything that opens a dialog waits for a click nobody
