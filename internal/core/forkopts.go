@@ -303,6 +303,7 @@ func (e *Engine) waitSSH(vmName string, port int, timeout, stall time.Duration, 
 		console = serialLogOf(info)
 	}
 	watch := stallWatch{path: console, limit: stall}
+	defer e.nudging(vmName)()
 	deadline := time.Now().Add(timeout)
 	for done := 0; ; {
 		if sshx.WaitReady(port, 3*time.Second) == nil {
@@ -430,4 +431,53 @@ func (e *Engine) renewMACs(name string, env *Env, nics []int, progress func(stri
 		return err
 	}
 	return e.waitReady(env, progress)
+}
+
+// nudgeEvery is how often a guest that is being waited for gets nudged.
+const nudgeEvery = 5 * time.Second
+
+// nudging pokes a VM at intervals for as long as something waits on it, and
+// returns the function that stops it.
+//
+// The hang waitSSH resets its way out of is, as far as it could be observed, a
+// virtual CPU waiting for a wake-up that was lost, and any outside request to
+// the VM process can deliver one: a Windows installer that had sat frozen for
+// 66 minutes moved the moment its screen was captured, and about one hung
+// Linux boot in three does the same. A screenshot changes nothing in the
+// guest, so it is the nudge. It is the only remedy for a guest with no
+// console log to judge a hang by, a Windows install above all, and for the
+// rest it often saves the reset.
+func (e *Engine) nudging(vmName string) (stop func()) {
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		ticker := time.NewTicker(nudgeEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				e.nudge(vmName)
+			}
+		}
+	}()
+	return func() {
+		close(done)
+		<-finished
+	}
+}
+
+// nudge captures the VM's screen and throws the picture away. Errors do not
+// matter: a VM with no display yet has nothing to capture and nothing to wake.
+func (e *Engine) nudge(vmName string) {
+	f, err := os.CreateTemp("", "terrarium-nudge-*.png")
+	if err != nil {
+		return
+	}
+	path := f.Name()
+	f.Close()
+	defer os.Remove(path)
+	e.VB.ScreenshotPNG(vmName, path)
 }

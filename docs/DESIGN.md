@@ -334,6 +334,17 @@ seventh hang ends the wait at once rather than sitting out the timeout. A
 golden's first boot gets up to four resets, each after 90 seconds, because
 cloud-init has quiet stretches of its own.
 
+The hang looks like a virtual CPU waiting for a wake-up that was lost, because
+any outside request to the VM process can end it: a Windows installer that had
+sat frozen for 66 minutes moved the moment its screen was captured, and a
+screenshot or a pause and resume freed about one hung Linux boot in three. So
+every readiness wait also nudges the VM with a discarded screenshot every five
+seconds. That changes nothing in the guest and is the only remedy for a guest
+with no console log to judge by - a Windows install above all, which went
+from a 90-minute timeout to a golden in eight minutes. For Linux forks it
+makes the reset a last resort: on the host where half the boots hung, 24
+forks in a row came up without one, in 16 to 55 seconds each.
+
 Two cases are told apart from that hang. A console that ends at a login
 prompt belongs to a guest that finished booting and has no sshd to offer, so
 it is waited for rather than put through the same boot again. A guest with no
