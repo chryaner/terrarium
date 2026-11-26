@@ -72,6 +72,10 @@ type screenshotInput struct {
 
 // --- doctor ---
 
+type doctorInput struct {
+	Goldens []string `json:"goldens,omitempty" jsonschema:"golden images to prove as well, by forking each, running a command in the fork and removing it. Slow, about half a minute each: use it when env_exec is refused on a fresh fork, not at the start of every session"`
+}
+
 type doctorOutput struct {
 	OK     bool         `json:"ok"`
 	Checks []core.Check `json:"checks"`
@@ -79,8 +83,15 @@ type doctorOutput struct {
 
 // doctorCheck deliberately does not build an engine: NewEngine fails outright
 // when VBoxManage is missing, which is exactly the case this tool reports on.
-func doctorCheck(ctx context.Context, _ *mcp.CallToolRequest, _ listInput) (*mcp.CallToolResult, doctorOutput, error) {
+func doctorCheck(ctx context.Context, _ *mcp.CallToolRequest, in doctorInput) (*mcp.CallToolResult, doctorOutput, error) {
 	checks := core.Doctor()
+	if len(in.Goldens) > 0 && core.DoctorOK(checks) {
+		e, err := engine()
+		if err != nil {
+			return nil, doctorOutput{}, err
+		}
+		checks = append(checks, e.CheckGoldens(in.Goldens, func(core.Check) {})...)
+	}
 	return nil, doctorOutput{OK: core.DoctorOK(checks), Checks: checks}, nil
 }
 
@@ -283,7 +294,7 @@ type envForkInput struct {
 	ShareHostPath string `json:"share_host_path,omitempty" jsonschema:"absolute host directory to mount at /work inside the guest, read-write"`
 	TTLSeconds    int    `json:"ttl_seconds,omitempty" jsonschema:"auto-remove the env this many seconds from now; env_gc collects it. Omit for no expiry"`
 	Hostname      string `json:"hostname,omitempty" jsonschema:"host name to give the guest; default keeps the golden image's, so every env of one golden has the same name"`
-	NewMAC        bool   `json:"new_mac,omitempty" jsonschema:"give the env its own network card addresses instead of the golden image's. Breaks networking in guests whose network settings name the card by address"`
+	NewMAC        bool   `json:"new_mac,omitempty" jsonschema:"give the env its own network card addresses instead of the golden image's, for envs that meet on a shared network or service. Costs one extra restart on Linux guests"`
 }
 
 type envOutput struct {

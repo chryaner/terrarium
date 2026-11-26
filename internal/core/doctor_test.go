@@ -130,3 +130,56 @@ func TestFixTextsPerOS(t *testing.T) {
 		t.Error("ssh install fix should name each OS's own route")
 	}
 }
+
+func TestCPUVirtChecks(t *testing.T) {
+	cases := []struct {
+		name    string
+		cpuinfo string
+		want    string // "", "ok" or "fail"
+	}{
+		{"intel", "processor : 0\nflags\t\t: fpu vme vmx sse\n", "ok"},
+		{"amd", "processor : 0\nflags : fpu svm sse\n", "ok"},
+		{"second core has it", "flags : fpu\nflags : fpu vmx\n", "ok"},
+		{"nested host without it", "processor : 0\nflags : fpu vme sse hypervisor\n", "fail"},
+		{"a longer flag is not a match", "flags : fpu vmx_fake svmx\n", "fail"},
+		{"no flags line, as on arm", "processor : 0\nFeatures : fp asimd\n", ""},
+		{"empty", "", ""},
+	}
+	for _, c := range cases {
+		path := filepath.Join(t.TempDir(), "cpuinfo")
+		if err := os.WriteFile(path, []byte(c.cpuinfo), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		checks := cpuVirtChecks(path)
+		switch c.want {
+		case "":
+			if len(checks) != 0 {
+				t.Errorf("%s: nothing to report, got %+v", c.name, checks)
+			}
+		case "ok":
+			if len(checks) != 1 || !checks[0].OK {
+				t.Errorf("%s: want one passing check, got %+v", c.name, checks)
+			}
+		case "fail":
+			if len(checks) != 1 || checks[0].OK || checks[0].Optional || checks[0].Fix == "" {
+				t.Errorf("%s: want one failing check with a fix, got %+v", c.name, checks)
+			}
+		}
+	}
+	if checks := cpuVirtChecks(filepath.Join(t.TempDir(), "absent")); len(checks) != 0 {
+		t.Errorf("an unreadable cpuinfo proves nothing, got %+v", checks)
+	}
+}
+
+func TestHypervisorChecksOnlyWarn(t *testing.T) {
+	if checks := hypervisorChecks(false); len(checks) != 0 {
+		t.Errorf("no hypervisor, nothing to say, got %+v", checks)
+	}
+	checks := hypervisorChecks(true)
+	if len(checks) != 1 || checks[0].OK || !checks[0].Optional || checks[0].Fix == "" {
+		t.Fatalf("want one optional warning with a fix, got %+v", checks)
+	}
+	if !DoctorOK(checks) {
+		t.Error("an active Windows hypervisor must not fail doctor: everything still works")
+	}
+}
