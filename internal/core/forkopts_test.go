@@ -184,3 +184,34 @@ func TestPosixHostnameScriptNamesEveryPlace(t *testing.T) {
 		}
 	}
 }
+
+func TestAtLoginPrompt(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name, content string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	booted := strings.Repeat("kernel line\n", 1000) + "Ubuntu 24.04 LTS ubuntu ttyS0\n\nubuntu login: "
+	hung := strings.Repeat("kernel line\n", 1000) + "Begin: Loading essential drivers ... "
+	// A prompt from before the last reset, far above the end of the log.
+	stale := "debian login: \n" + strings.Repeat("kernel line\n", 1000)
+
+	if !atLoginPrompt(write("booted", booted)) {
+		t.Error("a console ending at a login prompt is a booted guest")
+	}
+	if atLoginPrompt(write("hung", hung)) {
+		t.Error("a console that stops in the initramfs is not at a login prompt")
+	}
+	if atLoginPrompt(write("stale", stale)) {
+		t.Error("an old prompt far up the log says nothing about this boot")
+	}
+	if !atLoginPrompt(write("short", "login: ")) {
+		t.Error("a log shorter than the tail window is read whole")
+	}
+	if atLoginPrompt(filepath.Join(dir, "absent")) || atLoginPrompt("") {
+		t.Error("no log, no prompt")
+	}
+}

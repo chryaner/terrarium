@@ -31,8 +31,11 @@ each its own identity:
 
   terrarium fork ubuntu-24.04 agent1 --hostname agent1 --new-mac
 
---new-mac is not for every guest: an image whose network settings name the
-card by its address comes up with no network after the change.
+Linux images often name the network card by its address in their own
+settings, and would come up with no network after the change. So for a Linux
+guest terrarium can log in to, --new-mac first removes the address from those
+settings and restarts once. A guest it cannot log in to gets the new address
+before its first boot, and has to cope with it by itself.
 
 A fork that fails is removed again. The error quotes the end of the guest's
 serial console, and that log and a screenshot are kept in the data directory

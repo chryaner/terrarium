@@ -316,7 +316,7 @@ func (e *Engine) buildGolden(image, vmName, keyPath, isoPath string, progress fu
 	if err := e.VB.StartHeadless(vmName); err != nil {
 		return nil, err
 	}
-	if err := e.waitSSH(vmName, port, firstBootTimeout, progress); err != nil {
+	if err := e.waitSSH(vmName, port, firstBootTimeout, firstBootStall, firstBootResets, progress); err != nil {
 		return nil, err
 	}
 

@@ -345,11 +345,15 @@ func (e *Engine) prepareFork(g *Golden, name string, env *Env, opts ForkOpts, pr
 			return err
 		}
 	}
-	if opts.NewMAC {
-		for _, nic := range vbox.ActiveNICs(info) {
-			if err := e.VB.NewMAC(vmName, nic); err != nil {
-				return err
-			}
+	// A Linux image often names its network card by address in its own
+	// settings, and comes up with no network once the address changes. Where
+	// terrarium can log in, the address is therefore changed later, after the
+	// guest has been told to stop caring. Anywhere else it changes now.
+	nics := vbox.ActiveNICs(info)
+	macAfterBoot := opts.NewMAC && canRun(g) && !isWindowsGuest(env.OSType)
+	if opts.NewMAC && !macAfterBoot {
+		if err := e.newMACs(vmName, nics); err != nil {
+			return err
 		}
 	}
 	// Forks inherit the golden's pointing hardware, PS/2-only on most images.
@@ -373,7 +377,7 @@ func (e *Engine) prepareFork(g *Golden, name string, env *Env, opts ForkOpts, pr
 			return err
 		}
 	} else if g.hasCreds() {
-		if err := e.waitSSH(vmName, env.SSHPort, bootTimeout, progress); err != nil {
+		if err := e.waitBoot(vmName, env.SSHPort, progress); err != nil {
 			return err
 		}
 	} else {
@@ -381,6 +385,11 @@ func (e *Engine) prepareFork(g *Golden, name string, env *Env, opts ForkOpts, pr
 		// Nothing to wait for, but snapshotting the instant the VM starts
 		// would leave the revert target at the BIOS. Give it some boot.
 		time.Sleep(settleTime)
+	}
+	if macAfterBoot {
+		if err := e.renewMACs(name, env, nics, progress); err != nil {
+			return err
+		}
 	}
 	if opts.Hostname != "" {
 		progress("naming the guest " + opts.Hostname)
@@ -484,7 +493,7 @@ func (e *Engine) waitReady(env *Env, progress func(string)) error {
 		progress(credlessNote)
 		return nil
 	}
-	return e.waitSSH(env.VMName, env.SSHPort, bootTimeout, progress)
+	return e.waitBoot(env.VMName, env.SSHPort, progress)
 }
 
 // Down shuts an env down without touching state, so `up` can start it again.

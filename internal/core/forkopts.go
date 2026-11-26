@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,9 +52,7 @@ func checkForkHostname(host string, g *Golden) error {
 		return fmt.Errorf("hostname %q is too long for Windows: at most %d characters", host, netBIOSMax)
 	case windows && allDigits(host):
 		return fmt.Errorf("hostname %q is all digits, which Windows refuses", host)
-	case transportOf(g) == TransportGuestControl && (g.SSHUser == "" || g.SSHPassword == ""):
-		return fmt.Errorf("a hostname cannot be set on this golden: it records no login to run the rename with")
-	case transportOf(g) == TransportSSH && !g.hasCreds():
+	case !canRun(g):
 		return fmt.Errorf("a hostname cannot be set on this golden: it records no login to run the rename with")
 	}
 	return nil
@@ -250,9 +249,22 @@ func (e *Engine) bootEvidence(name string, env *Env) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-// consoleStall is how long a booting guest's console may stay silent, with
-// sshd still not answering, before the boot is taken to have hung.
-const consoleStall = 75 * time.Second
+// A booting guest whose console goes silent with sshd still not answering is
+// taken to have hung. A fork or a restart of an env boots a machine that has
+// booted before, in seconds, so half a minute of silence is already a hang.
+// On a host where it happens at all it happens to about every second boot, so
+// the resets have to be many for a fork to be dependable: six leave less than
+// one failure in a hundred. A golden's first boot runs cloud-init, which has
+// quiet stretches of its own and should not be interrupted lightly.
+const (
+	bootStall       = 30 * time.Second
+	bootResets      = 6
+	firstBootStall  = 90 * time.Second
+	firstBootResets = 4
+	// loginTail is how much of the end of a console log is searched for a
+	// login prompt.
+	loginTail = 2048
+)
 
 // serialLogOf is the file a VM's first serial port writes to, if it has one.
 func serialLogOf(info map[string]string) string {
@@ -266,31 +278,43 @@ func serialLogOf(info map[string]string) string {
 	return path
 }
 
+// waitBoot waits for the sshd of an env that has booted before.
+func (e *Engine) waitBoot(vmName string, port int, progress func(string)) error {
+	return e.waitSSH(vmName, port, bootTimeout, bootStall, bootResets, progress)
+}
+
 // waitSSH waits for a booting guest's sshd. Linux guests under VirtualBox now
 // and then stop dead in the first seconds of the kernel's boot and never
 // recover, while the same machine boots normally when restarted. So a guest
-// whose console has gone silent without sshd coming up gets the reset button
-// once, and the full timeout again. A guest with no console log gives nothing
-// to judge by and is simply waited for.
-func (e *Engine) waitSSH(vmName string, port int, timeout time.Duration, progress func(string)) error {
+// whose console has been silent for stall without sshd coming up gets the
+// reset button, up to resets times, and the full timeout again each time.
+//
+// Two cases are told apart from that hang. A console showing a login prompt
+// belongs to a guest that finished booting and simply has no sshd to offer;
+// resetting it would only repeat the same boot, so it is waited for. And a
+// guest with no console log gives nothing to judge by.
+func (e *Engine) waitSSH(vmName string, port int, timeout, stall time.Duration, resets int, progress func(string)) error {
 	console := ""
 	if info, err := e.VB.Info(vmName); err == nil {
 		console = serialLogOf(info)
 	}
-	stalled := stallWatch{path: console, limit: consoleStall}
+	watch := stallWatch{path: console, limit: stall}
 	deadline := time.Now().Add(timeout)
-	reset := false
-	for {
+	for done := 0; ; {
 		if sshx.WaitReady(port, 3*time.Second) == nil {
 			return nil
 		}
 		now := time.Now()
-		if !reset && stalled.check(now) {
-			progress(fmt.Sprintf("the guest console has been silent for %s with no sshd: resetting the machine once", consoleStall))
+		if watch.check(now) && !atLoginPrompt(console) {
+			if done == resets {
+				return fmt.Errorf("the guest hung while booting %d times in a row: its console went silent with no sshd on 127.0.0.1:%d", resets+1, port)
+			}
+			done++
+			progress(fmt.Sprintf("the guest console has been silent for %s with no sshd: resetting the machine (%d of %d)", stall, done, resets))
 			if err := e.VB.Reset(vmName); err != nil {
 				return err
 			}
-			reset = true
+			watch = stallWatch{path: console, limit: stall}
 			deadline = now.Add(timeout)
 			continue
 		}
@@ -298,6 +322,21 @@ func (e *Engine) waitSSH(vmName string, port int, timeout time.Duration, progres
 			return fmt.Errorf("no SSH banner on 127.0.0.1:%d after %s", port, timeout)
 		}
 	}
+}
+
+// atLoginPrompt reports whether a console log ends at a login prompt: the
+// sign of a guest that booted all the way.
+func atLoginPrompt(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	if fi, err := f.Stat(); err == nil && fi.Size() > loginTail {
+		f.Seek(-loginTail, io.SeekEnd)
+	}
+	tail, err := io.ReadAll(f)
+	return err == nil && strings.Contains(string(tail), "login:")
 }
 
 // stallWatch notices a log file that has stopped growing. Size, not the
@@ -325,4 +364,66 @@ func (w *stallWatch) check(now time.Time) bool {
 		return false
 	}
 	return w.size > 0 && now.Sub(w.changed) >= w.limit
+}
+
+// canRun reports whether terrarium holds a login it can run a command with
+// in a golden's guests.
+func canRun(g *Golden) bool {
+	if transportOf(g) == TransportGuestControl {
+		return g.SSHUser != "" && g.SSHPassword != ""
+	}
+	return g.hasCreds()
+}
+
+func (e *Engine) newMACs(vmName string, nics []int) error {
+	for _, nic := range nics {
+		if err := e.VB.NewMAC(vmName, nic); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// unpinNetworkScript removes the card address from a Linux guest's network
+// settings, in each place the common distributions keep one, so the same
+// settings apply to whatever address the card has next. cloud-init wrote most
+// of them and would write them again, so its network module is switched off.
+const unpinNetworkScript = `if [ "$(id -u)" = 0 ]; then s=; else s="sudo -n"; fi
+unpin() { if [ -d "$1" ]; then $s find "$1" -maxdepth 1 -type f -name "$2" -exec sed -i "$3" {} +; fi; }
+unpin /etc/netplan '*.yaml' '/^ *macaddress:/d; /^ *set-name:/d; /^ *match: *$/d'
+unpin /etc/NetworkManager/system-connections '*' '/^mac-address=/d'
+unpin /etc/sysconfig/network-scripts 'ifcfg-*' '/^HWADDR=/d; /^MACADDR=/d'
+unpin /etc/sysconfig/network 'ifcfg-*' '/^LLADDR=/d'
+$s rm -f /etc/udev/rules.d/70-persistent-net.rules
+if [ -d /etc/cloud/cloud.cfg.d ]; then
+  echo 'network: {config: disabled}' | $s tee /etc/cloud/cloud.cfg.d/99-terrarium-network.cfg >/dev/null
+fi
+$s sync
+`
+
+// renewMACs gives a running Linux fork new card addresses: unpin the guest's
+// network settings from the old one, shut down, change the hardware, boot
+// again. One restart dearer than changing it before the first boot, and the
+// only order in which the guest still has a network afterwards.
+func (e *Engine) renewMACs(name string, env *Env, nics []int, progress func(string)) error {
+	progress("freeing the guest's network settings from the golden's card address")
+	var out sshx.OutputBuffer
+	code, err := e.run(context.Background(), name, hostnameTimeout, "sh -s", strings.NewReader(unpinNetworkScript), &out, &out)
+	if err != nil {
+		return fmt.Errorf("preparing the guest for a new card address: %w", err)
+	}
+	if code != 0 {
+		return fmt.Errorf("preparing the guest for a new card address: exit %d: %s", code, strings.TrimSpace(out.String()))
+	}
+	progress("restarting with new network card addresses")
+	if err := e.Down(name); err != nil {
+		return err
+	}
+	if err := e.newMACs(env.VMName, nics); err != nil {
+		return err
+	}
+	if err := e.VB.StartHeadless(env.VMName); err != nil {
+		return err
+	}
+	return e.waitReady(env, progress)
 }
