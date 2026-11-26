@@ -55,7 +55,7 @@ jobs:
           terrarium doctor
           # KVM and VirtualBox cannot both hold VT-x.
           for m in kvm_intel kvm_amd kvm; do
-            if lsmod | grep -q "^$m "; then sudo modprobe -r "$m"; fi
+            if lsmod | grep "^$m " >/dev/null; then sudo modprobe -r "$m"; fi
           done
           terrarium doctor
       - name: Build a golden
@@ -92,7 +92,7 @@ jobs:
         timeout-minutes: 5
         run: |
           terrarium screenshot e2e /tmp/before.png
-          file /tmp/before.png | grep -q 'PNG image'
+          file /tmp/before.png | grep 'PNG image' >/dev/null
 
           # With the login prompt out of the way, a reader on the console
           # receives exactly what terrarium types.
@@ -106,7 +106,7 @@ jobs:
           terrarium keys e2e enter
 
           terrarium screenshot e2e /tmp/after.png
-          file /tmp/after.png | grep -q 'PNG image'
+          file /tmp/after.png | grep 'PNG image' >/dev/null
           if cmp -s /tmp/before.png /tmp/after.png; then
             echo "the screen did not change after typing"; exit 1
           fi
@@ -175,7 +175,7 @@ jobs:
           test "$(terrarium ls --goldens --json | jq -r '.[].role')" = golden:debian-12
           test "$(terrarium ls --goldens --envs --json | jq length)" = 2
           test "$(terrarium ls --envs --json | jq -r '.[0].arch')" = x64
-          terrarium ls | head -1 | grep -q ARCH
+          terrarium ls | grep ARCH >/dev/null
       - name: An env with its own identity
         timeout-minutes: 10
         run: |
@@ -183,7 +183,7 @@ jobs:
 
           # Refused before anything is cloned.
           if terrarium fork debian-12 bad --hostname 'a;b'; then exit 1; fi
-          if terrarium ls --envs | grep -q env:bad; then exit 1; fi
+          if terrarium ls --envs | grep env:bad >/dev/null; then exit 1; fi
 
           terrarium fork debian-12 own --hostname own-box --new-mac --cpus 1 --memory 1024
           test "$(terrarium exec own -- hostname)" = own-box
@@ -240,7 +240,7 @@ jobs:
           terrarium doctor --goldens debian-12 | tee /tmp/doctor.txt
           grep -q '^ok    golden debian-12: forks and runs a command' /tmp/doctor.txt
           # The probe env is gone again.
-          if terrarium ls --envs | grep -q doctor-; then exit 1; fi
+          if terrarium ls --envs | grep doctor- >/dev/null; then exit 1; fi
 
           if terrarium doctor --goldens no-such-golden > /tmp/doctor.txt; then exit 1; fi
           grep -q '^FAIL  golden no-such-golden' /tmp/doctor.txt
@@ -267,11 +267,11 @@ jobs:
           grep -q 'the guest console ended with:' /tmp/dead.txt
           grep -q 'login:' /tmp/dead.txt
           test -s "$d/failed/dead.serial.log"
-          file "$d/failed/dead.png" | grep -q 'PNG image'
+          file "$d/failed/dead.png" | grep 'PNG image' >/dev/null
 
           # Nothing is left to block the next attempt under the same name.
-          if terrarium ls --envs | grep -q env:dead; then exit 1; fi
-          if VBoxManage list vms | grep -q trr-dead; then exit 1; fi
+          if terrarium ls --envs | grep env:dead >/dev/null; then exit 1; fi
+          if VBoxManage list vms | grep trr-dead >/dev/null; then exit 1; fi
           terrarium fork debian-12 dead
           terrarium rm dead
       - name: A fork that hangs at boot
@@ -299,7 +299,7 @@ jobs:
           grep -q 'rolled back, nothing left behind' /tmp/hung.txt
           grep -q 'the guest console ended with:' /tmp/hung.txt
           test -s "$d/failed/hung.serial.log"
-          if terrarium ls --envs | grep -q env:hung; then exit 1; fi
+          if terrarium ls --envs | grep env:hung >/dev/null; then exit 1; fi
           terrarium rm --golden hangs
           terrarium rm --golden nossh
       - name: Data directory is owner-only
