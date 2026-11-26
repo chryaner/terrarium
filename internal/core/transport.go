@@ -242,5 +242,6 @@ func (e *Engine) waitGuestControl(env *Env, g *Golden, progress func(string)) er
 		noop = "true"
 	}
 	progress("waiting for guest additions")
+	defer e.nudging(env.VMName)()
 	return e.VB.GuestReady(context.Background(), env.VMName, creds, exe, append(args, noop), bootTimeout, progress)
 }

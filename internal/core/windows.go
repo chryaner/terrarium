@@ -281,6 +281,9 @@ func (e *Engine) installWindows(r recipe.Recipe, image, vmName, isoPath, goldens
 	if err != nil {
 		return nil, err
 	}
+	// An installer has no console log to tell a hang by, and has been seen to
+	// sit frozen for an hour until something touched the VM.
+	defer e.nudging(vmName)()
 
 	if r.UseSSH() {
 		// No cloud-init here: sshd answering is the whole readiness signal, and
