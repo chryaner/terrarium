@@ -26,7 +26,7 @@ import (
 // not good enough for something that decides whether the golden is reachable,
 // so it is created here too and failure to create it is ignored.
 //
-// It does four things past starting sshd. PowerShell becomes the SSH default
+// It does four things before starting sshd. PowerShell becomes the SSH default
 // shell, so a command sent to the guest needs one layer of quoting instead of
 // cmd.exe's three. The generated public key goes into
 // administrators_authorized_keys - the file sshd's stock config reads for
@@ -44,8 +44,6 @@ import (
 func windowsPostInstall(pubKey, user, password string) string {
 	return `powershell -ExecutionPolicy Bypass -NoProfile -Command ` +
 		`"Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0; ` +
-		`Set-Service -Name sshd -StartupType Automatic; ` +
-		`Start-Service sshd; ` +
 		// Windows expires a local password after 42 days and then refuses the
 		// account, key or not. A golden sits on a shelf far longer than that.
 		`net accounts /maxpwage:unlimited; ` +
@@ -63,7 +61,14 @@ func windowsPostInstall(pubKey, user, password string) string {
 		`$a = Join-Path $d administrators_authorized_keys; ` +
 		`Set-Content -Path $a -Value '` + pubKey + `'; ` +
 		// SIDs, not names: the builtin groups are localised on non-English Windows.
-		`icacls $a /inheritance:r /grant *S-1-5-32-544:F /grant *S-1-5-18:F"`
+		`icacls $a /inheritance:r /grant *S-1-5-32-544:F /grant *S-1-5-18:F; ` +
+		// sshd starts last, and that order is load-bearing: its banner is the
+		// signal the build waits for, and the build shuts the guest down the
+		// moment it sees one. Started any earlier, everything after it races
+		// that shutdown - and lost it on Windows 10, leaving a golden with
+		// cmd.exe sessions and no key, reachable only by its password.
+		`Set-Service -Name sshd -StartupType Automatic; ` +
+		`Start-Service sshd"`
 }
 
 // winlogonKey holds the automatic-logon settings. Spelled out rather than

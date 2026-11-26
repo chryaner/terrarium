@@ -150,3 +150,21 @@ func TestBadPostInstallChar(t *testing.T) {
 		}
 	}
 }
+
+// The build waits for sshd's banner and shuts the guest down when it sees
+// one, so anything the post-install does after starting sshd may never run.
+func TestWindowsPostInstallStartsSSHDLast(t *testing.T) {
+	cmd := windowsPostInstall(testPubKey, "terrarium", "pw")
+	start := strings.Index(cmd, "Start-Service sshd")
+	if start < 0 {
+		t.Fatal("post-install never starts sshd")
+	}
+	if rest := strings.TrimSuffix(cmd[start+len("Start-Service sshd"):], `"`); rest != "" {
+		t.Errorf("post-install does more after starting sshd, which races the shutdown: %q", rest)
+	}
+	for _, step := range []string{"DefaultShell", "administrators_authorized_keys", "icacls", "maxpwage:unlimited", "New-NetFirewallRule", "AutoAdminLogon"} {
+		if at := strings.Index(cmd, step); at < 0 || at > start {
+			t.Errorf("%s must be done before sshd starts", step)
+		}
+	}
+}
