@@ -52,6 +52,10 @@ func checkForkHostname(host string, g *Golden) error {
 		return fmt.Errorf("hostname %q is too long for Windows: at most %d characters", host, netBIOSMax)
 	case windows && allDigits(host):
 		return fmt.Errorf("hostname %q is all digits, which Windows refuses", host)
+	case windows && transportOf(g) == TransportGuestControl:
+		// Guest Additions run a command with the account's ordinary rights,
+		// administrator or not, and renaming a computer needs elevation.
+		return fmt.Errorf("a hostname cannot be set on this golden: renaming Windows needs elevated rights, which the guestcontrol transport does not have")
 	case !canRun(g):
 		return fmt.Errorf("a hostname cannot be set on this golden: it records no login to run the rename with")
 	}

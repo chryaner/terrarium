@@ -36,12 +36,17 @@ func TestCheckForkHostname(t *testing.T) {
 		{name: "no login recorded", host: "box", g: &Golden{OSType: "Ubuntu_64"}, wantErr: "records no login"},
 		{
 			name: "guestcontrol without a password", host: "box",
-			g:       &Golden{OSType: "Windows10_64", Transport: TransportGuestControl, SSHUser: "u"},
+			g:       &Golden{OSType: "Ubuntu_64", Transport: TransportGuestControl, SSHUser: "u"},
 			wantErr: "records no login",
 		},
 		{
-			name: "guestcontrol with a password", host: "box",
-			g: &Golden{OSType: "Windows10_64", Transport: TransportGuestControl, SSHUser: "u", SSHPassword: "p"},
+			name: "windows over guestcontrol is not elevated", host: "box",
+			g:       &Golden{OSType: "Windows7_64", Transport: TransportGuestControl, SSHUser: "u", SSHPassword: "p"},
+			wantErr: "needs elevated rights",
+		},
+		{
+			name: "linux over guestcontrol", host: "box",
+			g: &Golden{OSType: "Ubuntu_64", Transport: TransportGuestControl, SSHUser: "u", SSHPassword: "p"},
 		},
 	}
 	for _, c := range cases {
